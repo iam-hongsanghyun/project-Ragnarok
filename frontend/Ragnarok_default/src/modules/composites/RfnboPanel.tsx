@@ -1,5 +1,5 @@
 /**
- * RfnboPanel — the RFNBO matching rules (Commission Delegated Regulation (EU) 2023/1184) as run settings, with the
+ * RfnboPanel — the Composites -> Rules RFNBO matching rules (Commission Delegated Regulation (EU) 2023/1184) as run settings, with the
  * additionality and geographic checks shown BEFORE the solve. The settings are stored for the session and ride with
  * the next solve that does not set its own `options.rfnboConfig`; the checks come from `/api/p2x/rfnbo/checks`.
  */
@@ -60,7 +60,7 @@ export function RfnboPanel({ model }: Props) {
     return () => { live = false; window.clearTimeout(timer); };
   }, [cfg, model]);
 
-  if (!cfg) return <div className="p2x-scroll">{error ? <div className="p2x-error">{error}</div> : <p className="p2x-note">Loading RFNBO settings…</p>}</div>;
+  if (!cfg) return <div className="p2x-results">{error ? <div className="p2x-error">{error}</div> : <p className="p2x-note">Loading RFNBO settings…</p>}</div>;
 
   const set = (patch: Partial<RfnboConfig>) => { setCfg({ ...cfg, ...patch }); setSaved(''); };
   const year = firstSnapshotYear(model);
@@ -76,7 +76,7 @@ export function RfnboPanel({ model }: Props) {
   };
 
   return (
-    <div className="p2x-scroll">
+    <div className="p2x-results">
       <div className="p2x-grid">
         <div>
           <div className="p2x-card">
@@ -121,8 +121,8 @@ export function RfnboPanel({ model }: Props) {
             {!checks && <p className="p2x-note">Checking…</p>}
             {checks && (<>
               <p className="p2x-note">Electrolyser: {checks.electrolysers.join(', ') || 'none found'} · designated: {checks.designated.join(', ') || 'none'}</p>
-              {checks.electrolysers.length === 0 && <div className="p2x-warn">No electrolyser in the model: build a chain first. A solve with matching on would be refused.</div>}
-              {checks.designated.length === 0 && checks.electrolysers.length > 0 && <div className="p2x-warn">No designated generators: pick them in the chain designer (or the solve is refused).</div>}
+              {checks.electrolysers.length === 0 && <div className="p2x-warn">No electrolyser in the model: add a P2X composite first. A solve with matching on would be refused.</div>}
+              {checks.designated.length === 0 && checks.electrolysers.length > 0 && <div className="p2x-warn">No designated generators: pick them under Connections of the P2X composite (or the solve is refused).</div>}
               {checks.willBeRefused && checks.designated.length > 0 && <div className="p2x-error">With these settings no designated generator is eligible, so a solve with matching on would be refused.</div>}
               <CheckTable title="Additionality" rows={checks.additionality} label="Additionality checks" />
               <CheckTable title="Geographic correlation" rows={checks.geographic} label="Geographic checks" />

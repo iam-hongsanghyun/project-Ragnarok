@@ -269,6 +269,8 @@ interface TablesPaneProps {
   sel: TableSel;
   onSelChange: (sel: TableSel) => void;
   onUpdate: (sheet: SheetName, rowIndex: number, col: string, val: Primitive) => void;
+  /** Click on the owner (`plant`) cell of a composite-owned row, or the name cell of a RAGNAROK_Composites row: open that composite. */
+  onOpenOwner?: (plantId: string) => void;
   onAddRow: (sheet: SheetName) => void;
   onDeleteRow: (sheet: SheetName, rowIndex: number) => void;
   onAddColumn: (sheet: SheetName, col: string, defaultValue: string | number | boolean) => void;
@@ -309,6 +311,7 @@ export function TablesPane({
   sel,
   onSelChange,
   onUpdate,
+  onOpenOwner,
   onAddRow,
   onDeleteRow,
   onAddColumn,
@@ -454,6 +457,13 @@ export function TablesPane({
   const rows: GridRow[] = isTs
     ? (tsRows ?? [])
     : (model as any)[sel.sheet] ?? [];
+  // Rows a composite owns (its `plant` column) are tinted as a group; not on the RAGNAROK_ sheets.
+  const ownedRowSet = useMemo(() => {
+    const out = new Set<number>();
+    if (isTs || String(sel.sheet).startsWith('RAGNAROK')) return out;
+    ((model as any)[sel.sheet] ?? ([] as GridRow[])).forEach((r: GridRow, i: number) => { if (String(r.plant ?? '').trim()) out.add(i); });
+    return out;
+  }, [model, isTs, sel.sheet]);
 
   // Edit a ts cell: update the fetched rows locally (responsive) and persist to
   // the backend session via PATCH. Static-sheet edits keep using the prop
@@ -891,6 +901,14 @@ export function TablesPane({
               cols={visibleCols}
               frozenCol={frozenCol}
               storageKey={`${sel.kind}:${String(sel.sheet)}`}
+              onLinkCellClick={!isTs && onOpenOwner
+                ? (sel.sheet === 'RAGNAROK_Composites'
+                  ? { col: 'name', handler: (ri) => { const id = String(rows[ri]?.name ?? ''); if (id) onOpenOwner(id); } }
+                  : (visibleCols.includes('plant') && !String(sel.sheet).startsWith('RAGNAROK')
+                    ? { col: 'plant', handler: (ri) => { const id = String(rows[ri]?.plant ?? '').trim(); if (id) onOpenOwner(id); } }
+                    : undefined))
+                : undefined}
+              ownedRows={ownedRowSet}
               getColumnHeaderLabel={getColumnHeaderLabel}
               // Temporal VALUES are editable wherever the sheet is shown — a
               // profile has to be writable by hand, not import-only (the Model

@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp
 
 
@@ -37,7 +38,7 @@ def _trim(res: dict[str, Any]) -> dict[str, Any]:
 @mcp.tool(
     annotations=_RO,
     description=(
-        "The plant types Build can add as ONE unit: generator, bess (battery StorageUnit), ccgt, ocgt (gas turbines with DEA / technology-data cost, "
+        "List the plant types add_plant accepts (CCGT, OCGT gas turbine, BESS battery, generator, gas + hydrogen co-firing, P2X) with fields, defaults and units. Plant types Build can add as ONE unit: generator, bess (battery StorageUnit), ccgt, ocgt (gas turbines with DEA / technology-data cost, "
         "efficiency, minimum load, start-up cost and unit commitment when committable, plus opt-in advanced fields for a committable unit of fixed size: minLoadEfficiency (part-load efficiency: no-load fuel + incremental heat rate), startCostHot / startCostWarm / startCostCold with startWarmAfterHours / startColdAfterHours (start cost by offline time, run through a plants-module constraint) and startUpMinutes / shutDownMinutes (PyPSA ramp_limit_start_up / _shut_down); the ramp rate (per minute) and the minimum up / down times (hours) are written to RAGNAROK_TimeUnits and converted for the run's snapshot weights at solve time, see get_time_units), cofiring_simple (one generator burning a fixed gas / H2 blend: "
         "cost and CO2 factor from the share), cofiring_network (gas bus + H2 bus -> fuel bus -> turbine, blend limited by options.cofiringConfig or the plant's "
         "blendMin / blendMax) and p2x (electrolyser chain). Each entry lists its fields (key, label, unit, default, advanced) and defaults. Every plant needs a bus and a "
@@ -55,7 +56,7 @@ async def list_plant_types(include_technologies: bool = False) -> Any:
 @mcp.tool(
     annotations=_MUT,
     description=(
-        "Add one plant to the working model: type (see list_plant_types), bus, capacity and the type's fields in a flat spec, e.g. "
+        "Add a CCGT, OCGT gas turbine (가스터빈), BESS battery (배터리), plain generator, gas + hydrogen co-firing or P2X plant to the model as one unit, with part-load, ramp and start-up characteristics. type (see list_plant_types), bus, capacity and the type's fields in a flat spec, e.g. "
         "{'plantId': 'unit1', 'bus': 'grid', 'pNom': 400, 'committable': true} for a ccgt, or {'pNom': 400, 'committable': true, 'minLoadEfficiency': 0.52, 'startCostWarm': 90, 'startWarmAfterHours': 8, 'startCostCold': 130, 'startColdAfterHours': 48} for a ccgt with part-load efficiency and hot / warm / cold start costs (the preview lists the derived values), or {'turbine': 'ccgt', 'h2Share': 0.3, 'h2ShareUnit': 'vol'} for cofiring_simple, "
         "or {'turbine': 'ccgt', 'blendMax': 0.3, 'blendUnit': 'vol', 'blendScope': 'hourly'} for cofiring_network. Every component it creates carries the plant id in its "
         "`plant` column. Without confirm=true it returns the preview of what would be merged."
@@ -71,7 +72,7 @@ async def add_plant(type: str, spec: dict[str, Any] | None = None, confirm: bool
 @mcp.tool(
     annotations=_MUT,
     description=(
-        "Edit a plant: 'spec' is a patch laid over the plant's stored spec, and ALL its components are re-derived (old rows removed, new ones merged); buses and "
+        "Edit a CCGT / OCGT / BESS battery / co-firing plant (change capacity, bus, efficiency, hydrogen share). 'spec' is a patch laid over the plant's stored spec, and ALL its components are re-derived (old rows removed, new ones merged); buses and "
         "carriers other components use are kept. A plant imported without a registry row cannot be edited (remove it and add it again). Without confirm=true it "
         "returns the preview."
     ),
@@ -86,7 +87,7 @@ async def edit_plant(plant_id: str, spec: dict[str, Any], confirm: bool = False)
 @mcp.tool(
     annotations=_MUT,
     description=(
-        "Remove a plant: deletes every component carrying its plant id (generators, links, processes, stores, loads, the registry row and the buses / carriers only "
+        "Remove a CCGT / OCGT / BESS battery / co-firing plant. Deletes every component carrying its plant id (generators, links, processes, stores, loads, the registry row and the buses / carriers only "
         "it uses) and nothing else; a bus or carrier another component still references is kept and released from the plant. Without confirm=true it returns the preview."
     ),
 )
@@ -112,3 +113,13 @@ async def get_plant_results(run_name: str, plant_id: str | None = None, period: 
     if not include_series and isinstance(res, dict):
         res["seriesHint"] = "Per-snapshot series omitted; call with include_series=true to get them."
     return res
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "list_plant_types": "composites",
+    "add_plant": "composites",
+    "edit_plant": "composites",
+    "remove_plant": "composites",
+    "get_plant_results": "composites",
+})

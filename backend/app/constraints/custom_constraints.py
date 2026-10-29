@@ -180,8 +180,12 @@ def apply_custom_constraints(
     emissions_factors: dict[str, float],
     notes: list[str],
     snapshots: Any | None = None,
+    skip: frozenset[int] = frozenset(),
 ) -> None:
     """Apply all enabled custom constraints to the linopy model.
+
+    ``skip`` holds the list indices already written as native ``GlobalConstraint`` rows
+    (:mod:`.native_routing`); they are not added again.
 
     Called inside extra_functionality, so n.model is available. ``snapshots`` is
     the window being optimised (rolling horizon) — weights/hours are scoped to
@@ -206,7 +210,7 @@ def apply_custom_constraints(
 
     failures: list[str] = []
     for i, c in enumerate(constraints):
-        if not c.get("enabled", False):
+        if not c.get("enabled", False) or i in skip:
             continue
 
         metric: str = c.get("metric", "")

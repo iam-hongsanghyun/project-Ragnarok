@@ -27,6 +27,9 @@ export const PROVENANCE_SHEET = 'RAGNAROK_Provenance';
 /** Build plant registry (one JSON row per plant: type, spec, components) and the P2X chain registry. Both must travel with the workbook, or a plant could not be edited after a reload. */
 export const PLANT_REGISTRY_SHEET = 'RAGNAROK_PLANTS';
 export const P2X_REGISTRY_SHEET = 'RAGNAROK_P2X';
+/** One row per composite instance (name, type, ports, size, build_year, lifetime): the user's surface for a composite; and the saved templates. */
+export const COMPOSITES_SHEET = 'RAGNAROK_Composites';
+export const COMPOSITE_TEMPLATES_SHEET = 'RAGNAROK_CompositeTemplates';
 /** One-row sheet `{ ragnarok_schema_version }` stamping the cost basis the workbook is written for. 2 = PyPSA cost
  *  semantics (`capital_cost` per modelled horizon, `overnight_cost` annuitised by PyPSA); 3 = the carbon price is an
  *  objective term (not in `marginal_cost`) and `e_sum_*` / GlobalConstraint constants are PyPSA horizon totals, with yearly
@@ -468,7 +471,7 @@ export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'au
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
   appendPiecewiseSheets(workbook, model);
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET, SCHEMA_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET, COMPOSITES_SHEET, COMPOSITE_TEMPLATES_SHEET, SCHEMA_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -653,7 +656,7 @@ export function buildProjectWorkbook(
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET, SCHEMA_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET, COMPOSITES_SHEET, COMPOSITE_TEMPLATES_SHEET, SCHEMA_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);

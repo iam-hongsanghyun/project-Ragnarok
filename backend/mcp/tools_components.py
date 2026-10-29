@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .client import RagnarokSettingUp
+from .catalogue import declare_areas
 from .server import (
     _BUILD_ANN,
     _EXPORT_ANN,
@@ -213,3 +214,13 @@ async def export_pypsa_native(
 )
 async def pypsa_io_capabilities() -> Any:
     return await get_client().pypsa_io_capabilities()
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "apply_seasonal_rating": "build",
+    "set_maintenance": "time_ops",
+    "import_pypsa_native": "data",
+    "export_pypsa_native": "data",
+    "pypsa_io_capabilities": "data",
+})

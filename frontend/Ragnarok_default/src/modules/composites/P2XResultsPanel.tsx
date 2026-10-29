@@ -11,7 +11,7 @@ import type { ReportRunOption } from 'lib/reporting/types';
 import { readChartTheme } from 'lib/charts/theme';
 import { useEChart } from '../../shared/echarts/useEChart';
 import { buildDispatchOption, buildSocOption, buildWaterfallOption } from './charts';
-import { pathwayPeriodsOf } from './spec';
+import { pathwayPeriodsOf } from './pathway';
 
 const fmt = (v: number | undefined | null, digits = 2): string =>
   v === undefined || v === null || !Number.isFinite(v) ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -40,9 +40,17 @@ function Checks({ title, rows }: { title: string; rows: CheckRow[] }) {
   );
 }
 
-export function ResultsPanel() {
-  const [runs, setRuns] = React.useState<ReportRunOption[]>([]);
-  const [run, setRun] = React.useState('');
+interface Props {
+  /** The Results section owns the run picker: pass the list and the chosen run and this panel shows no picker of its own. */
+  runs?: ReportRunOption[];
+  run?: string;
+}
+
+export function P2XResultsPanel({ runs: runsProp, run: runProp }: Props) {
+  const [ownRuns, setRuns] = React.useState<ReportRunOption[]>([]);
+  const [ownRun, setRun] = React.useState('');
+  const runs = runsProp ?? ownRuns;
+  const run = runProp ?? ownRun;
   const [period, setPeriod] = React.useState('');
   const pathway = React.useMemo(() => pathwayPeriodsOf(runs.find((r) => r.name === run)), [runs, run]);
   // a period only means something for a pathway run: drop a stale pick when the run changes to a single-period one
@@ -58,11 +66,13 @@ export function ResultsPanel() {
   const [fitAxis, setFitAxis] = React.useState(true);
 
   React.useEffect(() => {
+    if (runsProp) return undefined;
     let live = true;
     fetchReportRuns()
       .then((list) => { if (live) { setRuns(list); setRun((cur) => cur || list[0]?.name || ''); } })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   React.useEffect(() => {
@@ -93,13 +103,14 @@ export function ResultsPanel() {
   const ga = data?.rfnbo.gridAlternatives;
 
   return (
-    <div className="p2x-scroll">
+    <div className="p2x-results">
       <div className="p2x-card">
         <div className="p2x-row">
-          <label htmlFor="p2x-run" style={{ minWidth: 0 }}>Stored run</label>
-          <select id="p2x-run" value={run} onChange={(e) => setRun(e.target.value)} disabled={runs.length === 0}>
-            {runs.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
-          </select>
+          {!runsProp && (<>
+            <label htmlFor="p2x-run" style={{ minWidth: 0 }}>Stored run</label>
+            <select id="p2x-run" value={run} onChange={(e) => setRun(e.target.value)} disabled={runs.length === 0}>
+              {runs.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+            </select></>)}
           <label htmlFor="p2x-mode" style={{ minWidth: 0 }}>Electricity cost</label>
           <select id="p2x-mode" value={mode} onChange={(e) => setMode(e.target.value as 'nodal' | 'ppa')}>
             <option value="nodal">Nodal price × consumption</option><option value="ppa">PPA cost of the designated generators</option>
@@ -117,7 +128,7 @@ export function ResultsPanel() {
             <select id="p2x-period" value="" disabled title="Only a pathway (multi-period) run has investment periods"><option value="">single-period run</option></select>
           )}
         </div>
-        {runs.length === 0 && !error && <p className="p2x-note">No stored runs yet. Build a chain, solve the model, then come back.</p>}
+        {runs.length === 0 && !error && <p className="p2x-note">No stored runs yet. Add a P2X composite, solve the model, then come back.</p>}
         {error && <div className="p2x-error" role="alert">{error}</div>}
         {busy && <p className="p2x-src">Reading the run…</p>}
       </div>
@@ -153,7 +164,7 @@ export function ResultsPanel() {
         <div className="p2x-card">
           <h3>Electrolyser dispatch against the designated RES</h3>
           {data.rfnbo.designated.length === 0
-            ? <p className="p2x-note">No designated generators were set, so no matching can be shown. Pick them in the chain designer.</p>
+            ? <p className="p2x-note">No designated generators were set, so no matching can be shown. Pick them under Connections when adding the P2X composite.</p>
             : <p className="p2x-src">Designated: {data.rfnbo.designated.join(', ')}. Drag or scroll to zoom.</p>}
           <div className="p2x-row"><label style={{ minWidth: 0 }}><input type="checkbox" checked={fitAxis} onChange={(e) => setFitAxis(e.target.checked)} /> Fit the MW axis to the electrolyser (the designated fleet is clipped where it is far larger)</label></div>
           {dispatch && <Chart option={dispatch} label="Electrolyser dispatch against the designated RES" tall />}

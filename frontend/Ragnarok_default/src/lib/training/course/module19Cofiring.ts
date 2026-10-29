@@ -2,7 +2,7 @@
  * Module 19 — Gas + H2 co-firing and CCGT operations (10 steps).
  *
  * Module 5 drew a CCGT as a Link from a gas bus; module 11 committed a coal unit by
- * hand. This module uses the plant picker's thermal plants: a CCGT, then a gas + H2
+ * hand. This module uses the thermal composites of the Composites tab: a CCGT, then a gas + H2
  * co-firing plant whose fuel is a blend the solver chooses within limits, and then
  * the operating detail a CCGT is now modelled with — minimum load, minimum up and
  * down times stated in hours, part-load efficiency and start costs that depend on how
@@ -93,18 +93,18 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
       'Starting from module 18\'s grid. It has no h2 bus with a pipeline, and its flat price would hide every '
       + 'operating effect this module looks for.',
       'A run refused with "RFNBO matching is on but the model has no electrolyser". Module 18\'s matching setting is '
-      + 'stored for the session, not the workbook: untick RFNBO matching on in P2X → RFNBO and Save settings.',
+      + 'stored for the session, not the workbook: untick RFNBO matching on in Composites → Rules and Save settings.',
     ],
   },
 
   {
     id: 'm19-gas-only-ccgt',
     section: SECTION,
-    title: 'A gas-only CCGT from the plant picker',
-    tab: 'Build',
-    where: 'Build → Generators step → Add a plant',
+    title: 'A gas-only CCGT from the Composites tab',
+    tab: 'Composites',
+    where: 'Composites → Add a composite',
     concept: [
-      'The plant picker\'s CCGT is three components. A GAS BUS, a gas SUPPLIER on it (a generator at the gas price, '
+      'The Composites tab\'s CCGT is three components. A GAS BUS, a gas SUPPLIER on it (a generator at the gas price, '
       + 'sized by the solver), and the turbine: a Link from the gas bus to the grid with the CCGT\'s efficiency. The '
       + 'Link\'s p_nom is measured on its INPUT, so 200 MW of electricity at 0.58 is 200 / 0.58 = 344.8 MW of fuel, '
       + 'and its variable O&M is written per MWh of fuel: 5.61 x 0.58 = 3.254.',
@@ -119,7 +119,7 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
       + 'the marginal unit.',
     ],
     explain: [
-      'Build → Generators → Add a plant: Plant type CCGT (gas combined cycle), Plant name ccgt, Capacity 200, leave '
+      'Composites → Add a composite: Composite type CCGT (gas combined cycle), Plant name ccgt, Capacity 200, leave '
       + 'Let the solver size it and Unit commitment unticked. Press Add CCGT.',
 
       'The Links step now has ccgt from ccgt_bus_gas to grid, efficiency 0.58, p_nom 344.827586, marginal_cost '
@@ -129,18 +129,18 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
       + 'System emissions 4,234.15 tCO2: the Emissions breakdown card totals them to 0.1 kt (4.2 ktCO2e) and its '
       + 'per-generator table gives the gas supplier and the peaker to the tonne. This module quotes the sum.',
 
-      'There is no Analytics card for plant results yet. They are an API read: /api/build/plant/results/{run name} '
-      + '(the run name is in History; the MCP tool get_plant_results returns the same). For ccgt it reports '
+      'Analytics → Result has a Composites card with one row per composite, and Composites → Results shows the same '
+      + 'table for any stored run (the API read is /api/build/plant/results/{run name}; the MCP tool get_plant_results '
+      + 'returns the same). For ccgt it reports '
       + 'generationMwh 9,749.3, capacityFactor 0.677 and starts 3, counted from the dispatch because the unit is '
       + 'not committable.',
     ],
     spotlights: [
       {
-        selector: '[data-testid="plant-picker"]',
-        buildStep: 'generators',
+        selector: '[data-testid="composite-form"]',
         title: 'CCGT (gas combined cycle)',
-        tab: 'Build',
-        note: 'A bus, a capacity and a few fields; Advanced shows the defaults come from the ccgt technology entry. '
+        tab: 'Composites',
+        note: 'Connections, a capacity and a few fields; Advanced shows the defaults come from the ccgt technology entry. '
           + 'The preview lists what it will create before anything is applied.',
       },
       {
@@ -153,7 +153,7 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     ],
     entries: [
       {
-        field: 'Build → Generators → Add a plant → Plant type, Plant name, Capacity',
+        field: 'Composites → Add a composite → Composite type, Plant name, Capacity',
         label: 'the gas-only reference plant',
         value: 'CCGT (gas combined cycle), ccgt, 200',
         unit: 'MW',
@@ -181,8 +181,8 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     id: 'm19-cofiring-cap',
     section: SECTION,
     title: 'The co-firing plant, and a cap that does nothing',
-    tab: 'Build',
-    where: 'Build → Generators → Plants, then Add a plant',
+    tab: 'Composites',
+    where: 'Composites → In this model, then Add a composite',
     concept: [
       'The co-firing plant (fuel network) keeps gas and hydrogen as separate fuels until the turbine. A gas bus and '
       + 'the h2 bus each feed a TURBINE-FUEL bus through a Link at efficiency 1 — a gas feeder and an H2 feeder — '
@@ -199,7 +199,7 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
       + 'hydrogen is burned only if something forces it.',
     ],
     explain: [
-      'Build → Generators → Plants: Delete on ccgt and confirm (Delete plant). Then Add a plant: Plant type Gas + H2 '
+      'Composites → In this model: Delete on ccgt and confirm (Delete composite). Then Add a composite: Composite type Gas + H2 '
       + 'co-firing (fuel network), Plant name cofire, Capacity 200, H2 bus h2, Maximum H2 share 0.3, Share basis '
       + 'vol, Applies hourly. Leave Minimum H2 share blank.',
 
@@ -212,10 +212,9 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     ],
     spotlights: [
       {
-        selector: '[data-testid="plant-list"]',
-        buildStep: 'generators',
-        title: 'Delete the CCGT as one plant',
-        tab: 'Build',
+        selector: '[data-testid="composite-table"]',
+        title: 'Delete the CCGT as one composite',
+        tab: 'Composites',
         note: 'Delete removes the plant\'s Link, supplier, bus and carriers together. The confirmation lists what '
           + 'goes and what stays because another component still uses it.',
       },
@@ -230,14 +229,14 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     ],
     entries: [
       {
-        field: 'Build → Generators → Add a plant → Plant type, Plant name, Capacity, H2 bus',
+        field: 'Composites → Add a composite → Composite type, Plant name, Capacity, H2 bus',
         label: 'the co-firing turbine',
         value: 'Gas + H2 co-firing (fuel network), cofire, 200, h2',
         why: 'The same 200 MW turbine as the CCGT, now able to draw from the pipeline\'s bus as well as from a gas bus. '
           + 'Blank H2 bus would create a new one with its own supplier at the H2 price.',
       },
       {
-        field: 'Build → Generators → Add a plant → Maximum H2 share, Share basis, Applies',
+        field: 'Composites → Add a composite → Maximum H2 share, Share basis, Applies',
         label: 'the combustor limit',
         value: '0.3, vol, hourly',
         why: 'A fraction in the basis chosen: 0.3 vol is 30% of the fuel by volume. Hourly makes it hold in every '
@@ -250,7 +249,7 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
       expect: 'Total cost 720,242, the gas-only answer; no hydrogen burned.',
     },
     verify: [
-      'The Plants list holds cofire only, with 11 rows',
+      'The In this model table holds cofire only, with 11 rows',
       'Total cost reads 720,242',
       'You can say why a maximum share alone burns no hydrogen, and what carbon price would change that',
     ],
@@ -266,8 +265,8 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     id: 'm19-blend-mandate',
     section: SECTION,
     title: 'Force 30 vol%: what it costs and what it avoids',
-    tab: 'Build',
-    where: 'Build → Generators → Plants → cofire → Edit',
+    tab: 'Composites',
+    where: 'Composites → In this model → cofire → Edit',
     concept: [
       'Set the minimum share to 0.3 as well and the blend is fixed: 30% of the fuel by volume, every hour. In '
       + 'energy that is much less. A normal cubic metre of hydrogen carries 10.78 MJ and one of methane 35.8 MJ — '
@@ -301,16 +300,15 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     spotlights: [
       {
         selector: '[data-plant="cofire"]',
-        buildStep: 'generators',
-        title: 'Edit the plant',
-        tab: 'Build',
+        title: 'Edit the composite',
+        tab: 'Composites',
         note: 'The form opens with the stored spec. Set Minimum H2 share and Save changes: the plant is re-derived '
           + 'with the new blend limits stored with it, and the next solve applies them.',
       },
     ],
     entries: [
       {
-        field: 'Build → Generators → Plants → cofire → Edit → Minimum H2 share',
+        field: 'Composites → In this model → cofire → Edit → Minimum H2 share',
         label: 'the blend mandate',
         value: '0.3',
         why: 'With the maximum also at 0.3 the share is fixed at 30 vol% in every hour. It is what a supply contract '
@@ -339,8 +337,8 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     id: 'm19-wrong-basis',
     section: SECTION,
     title: 'The same 0.3 on the energy basis',
-    tab: 'Build',
-    where: 'Build → Generators → Plants → cofire → Edit',
+    tab: 'Composites',
+    where: 'Composites → In this model → cofire → Edit',
     concept: [
       'The plant\'s Share basis decides what 0.3 means. Switch it from vol to energy and 0.3 is 30% of the ENERGY — '
       + 'which is (0.3 / 10.78) / (0.3 / 10.78 + 0.7 / 35.8) = 58.7% by volume. Nearly twice the volume share of '
@@ -362,7 +360,7 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     ],
     entries: [
       {
-        field: 'Build → Generators → Plants → cofire → Edit → Share basis',
+        field: 'Composites → In this model → cofire → Edit → Share basis',
         label: 'what the 0.3 is a share of',
         value: 'energy, then back to vol',
         why: 'The experiment shows the cost of a unit slip: the same 0.3 typed on the energy basis is 58.7 vol% and '
@@ -442,7 +440,7 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
           + 'requirement does when the hydrogen is not there.',
       },
       {
-        field: 'Build → Generators → Plants → cofire → Edit → Applies',
+        field: 'Composites → In this model → cofire → Edit → Applies',
         label: 'where the share must hold',
         value: 'period, then back to hourly',
         why: 'Period lets some hours burn more hydrogen than 30 vol% if others burn less. Fine for a target, wrong for '
@@ -472,8 +470,8 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     id: 'm19-commitment',
     section: SECTION,
     title: 'Unit commitment: a minimum load and minimum times in hours',
-    tab: 'Build',
-    where: 'Build → Generators → cofire → Edit, then Build → Links → Time units',
+    tab: 'Composites',
+    where: 'Composites → In this model → cofire → Edit, then Build → Links → Time units',
     concept: [
       'Every run so far let the turbine run at any output from 0 to 200 MW, and stop and start for free. Module 11 '
       + 'showed what a real plant adds. Tick Unit commitment on the plant and the picker writes three of them onto '
@@ -523,10 +521,17 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
         note: 'The CCGT band falls to zero for 5 hours around noon on the two sunny days and sits at its 80 MW minimum '
           + 'through the cloudy middle day: 2 starts, 62 hours online.',
       },
+      {
+        selector: '[data-card="commitment"]',
+        title: 'The commitment card',
+        tab: 'Analytics',
+        note: 'The committed turbine is listed with its starts and online hours: 2 starts, and the on/off '
+          + 'segments show the two noon stops.',
+      },
     ],
     entries: [
       {
-        field: 'Build → Generators → Plants → cofire → Edit → Unit commitment',
+        field: 'Composites → In this model → cofire → Edit → Unit commitment',
         label: 'make the turbine a committed unit',
         value: 'ticked',
         why: 'Writes committable, p_min_pu 0.4 and a 12,000 start-up cost on the turbine and the time-unit rows for its '
@@ -563,8 +568,8 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     id: 'm19-part-load',
     section: SECTION,
     title: 'Part-load efficiency: fuel that is burned just to stay on',
-    tab: 'Build',
-    where: 'Build → Generators → cofire → Edit → Advanced',
+    tab: 'Composites',
+    where: 'Composites → In this model → cofire → Edit → Advanced',
     concept: [
       'A turbine is less efficient at part load. The data file says so — the DEA sheet notes low efficiency at low '
       + 'loads — but gives no number, so the value is plant data you supply. Use 0.52 at the 0.4 minimum load, '
@@ -596,16 +601,15 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     spotlights: [
       {
         selector: '[data-testid="plant-derived"]',
-        buildStep: 'generators',
         title: 'Derived values, before you save',
-        tab: 'Build',
+        tab: 'Composites',
         note: 'The heat-rate line the two efficiencies imply, and how it is written into PyPSA. Check the no-load fuel '
           + 'here: it is what makes running at minimum load expensive.',
       },
     ],
     entries: [
       {
-        field: 'Build → Generators → Plants → cofire → Edit → Advanced → Efficiency at minimum load',
+        field: 'Composites → In this model → cofire → Edit → Advanced → Efficiency at minimum load',
         label: 'part-load efficiency (plant data)',
         value: '0.52',
         why: 'Not in the data file, so it is your assumption. With 0.58 at full load it gives 26.5 MW of no-load fuel '
@@ -634,8 +638,8 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     id: 'm19-start-tiers',
     section: SECTION,
     title: 'Hot, warm and cold starts: the cost of having been off',
-    tab: 'Build',
-    where: 'Build → Generators → cofire → Edit → Advanced',
+    tab: 'Composites',
+    where: 'Composites → In this model → cofire → Edit → Advanced',
     concept: [
       'A CCGT that has been off for a short while is still hot and restarts cheaply; after longer it has cooled and '
       + 'a start wears it more and burns more. PyPSA has one start_up_cost per unit. Ragnarok adds TIERS: the native '
@@ -678,7 +682,7 @@ export const MODULE_19_COFIRING: TutorialStep[] = [
     ],
     entries: [
       {
-        field: 'Build → Generators → Plants → cofire → Edit → Advanced → Warm start cost, Warm start after',
+        field: 'Composites → In this model → cofire → Edit → Advanced → Warm start cost, Warm start after',
         label: 'the warm tier (assumed)',
         value: '120 and 5',
         unit: 'per MW; h offline',

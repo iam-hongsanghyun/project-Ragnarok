@@ -1,6 +1,5 @@
-/* P2X tab: chain designer, RFNBO panel, results. Tokens only (see styles/_tokens.css). */
-.p2x-view { display: flex; flex-direction: column; min-height: 0; }
-.p2x-scroll { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px 40px; }
+/* Composites tab: the RFNBO rules and the P2X results (class prefix p2x- kept). Tokens only (see styles/_tokens.css). */
+.p2x-results { min-width: 0; }
 .p2x-grid { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); gap: 20px; align-items: start; }
 @media (max-width: 1000px) { .p2x-grid { grid-template-columns: 1fr; } }
 .p2x-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; }

@@ -1,0 +1,257 @@
+[
+ {
+  "request": "add a CCGT plant at bus 3",
+  "expect": [
+   "add_plant",
+   "list_plant_types"
+  ]
+ },
+ {
+  "request": "CCGT를 버스 3개에 넣어줘",
+  "expect": [
+   "add_plant",
+   "list_plant_types"
+  ]
+ },
+ {
+  "request": "수소 생산 단가 보여줘",
+  "expect": [
+   "get_p2x_results"
+  ]
+ },
+ {
+  "request": "put a battery (BESS) on the Seoul bus",
+  "expect": [
+   "add_plant",
+   "list_plant_types",
+   "add_storage"
+  ]
+ },
+ {
+  "request": "배터리 추가해줘",
+  "expect": [
+   "add_plant",
+   "add_storage",
+   "list_plant_types"
+  ]
+ },
+ {
+  "request": "what is the levelised cost of hydrogen from my electrolyser",
+  "expect": [
+   "get_p2x_results"
+  ]
+ },
+ {
+  "request": "build an electrolyser and ammonia chain",
+  "expect": [
+   "build_p2x_chain",
+   "preview_p2x_chain",
+   "list_p2x_technologies"
+  ]
+ },
+ {
+  "request": "co-fire 30% hydrogen in a gas turbine",
+  "expect": [
+   "add_plant",
+   "list_plant_types"
+  ]
+ },
+ {
+  "request": "set the ramp rate of the gas generator to 2% per minute",
+  "expect": [
+   "set_time_units"
+  ]
+ },
+ {
+  "request": "show the ramping limits stated for the units",
+  "expect": [
+   "get_time_units"
+  ]
+ },
+ {
+  "request": "minimum up time of 4 hours for the CCGT",
+  "expect": [
+   "set_time_units"
+  ]
+ },
+ {
+  "request": "change the time step to 3 hours",
+  "expect": [
+   "retarget_snapshots"
+  ]
+ },
+ {
+  "request": "시간 단위를 3시간으로 바꿔줘",
+  "expect": [
+   "retarget_snapshots",
+   "set_weightings_from_spacing"
+  ]
+ },
+ {
+  "request": "탄소 가격을 50으로 설정해줘",
+  "expect": [
+   "set_carbon_price"
+  ]
+ },
+ {
+  "request": "cap annual gas generation at 20 TWh",
+  "expect": [
+   "set_annual_budget"
+  ]
+ },
+ {
+  "request": "limit total CO2 emissions with a constraint",
+  "expect": [
+   "set_custom_dsl",
+   "set_annual_budget"
+  ]
+ },
+ {
+  "request": "reduce the network to 10 buses",
+  "expect": [
+   "cluster_network",
+   "cluster_network_hac"
+  ]
+ },
+ {
+  "request": "keep only the first week of snapshots",
+  "expect": [
+   "slice_model"
+  ]
+ },
+ {
+  "request": "use representative days to speed up the run",
+  "expect": [
+   "temporal_cluster",
+   "sample_workbook"
+  ]
+ },
+ {
+  "request": "forecast demand growth to 2040",
+  "expect": [
+   "forecast_demand",
+   "driver_forecast"
+  ]
+ },
+ {
+  "request": "solve the model",
+  "expect": [
+   "submit_solve"
+  ]
+ },
+ {
+  "request": "cancel the running solve",
+  "expect": [
+   "cancel_solve"
+  ]
+ },
+ {
+  "request": "show total system cost and emissions of the last run",
+  "expect": [
+   "get_kpis",
+   "get_analytics"
+  ]
+ },
+ {
+  "request": "compare the base and high-renewable runs",
+  "expect": [
+   "compare_runs"
+  ]
+ },
+ {
+  "request": "hourly dispatch by carrier",
+  "expect": [
+   "get_derived",
+   "get_run_series"
+  ]
+ },
+ {
+  "request": "how reliable is the system: loss of load and reserves",
+  "expect": [
+   "describe_analytics"
+  ]
+ },
+ {
+  "request": "import Korea power plants and demand",
+  "expect": [
+   "one_click_model",
+   "build_starter_pack",
+   "import_dataset"
+  ]
+ },
+ {
+  "request": "load an example model",
+  "expect": [
+   "load_example",
+   "list_examples"
+  ]
+ },
+ {
+  "request": "save the model to an Excel workbook",
+  "expect": [
+   "export_workbook"
+  ]
+ },
+ {
+  "request": "undo my last edit",
+  "expect": [
+   "undo_journal_entry",
+   "get_journal"
+  ]
+ },
+ {
+  "request": "flood and heatwave damage to my assets",
+  "expect": [
+   "physical_risk_seed"
+  ]
+ },
+ {
+  "request": "which wind and solar sites are complementary",
+  "expect": [
+   "siting_correlation",
+   "siting_optimise_portfolio",
+   "siting_portfolio_metrics"
+  ]
+ },
+ {
+  "request": "increase all gas generator capacity by 10%",
+  "expect": [
+   "adjust_values",
+   "adjust_carrier_capacity"
+  ]
+ },
+ {
+  "request": "add a transmission line between bus A and bus B",
+  "expect": [
+   "add_line"
+  ]
+ },
+ {
+  "request": "set up a shiftable load with demand response",
+  "expect": [
+   "apply_demand_response",
+   "get_demand_response"
+  ]
+ },
+ {
+  "request": "what is loaded right now",
+  "expect": [
+   "get_world_state"
+  ]
+ },
+ {
+  "request": "add a heat pump or electric boiler",
+  "expect": [
+   "add_conversion",
+   "list_conversions"
+  ]
+ },
+ {
+  "request": "RFNBO hourly matching for green hydrogen",
+  "expect": [
+   "describe_run_options",
+   "get_p2x_results",
+   "build_p2x_chain"
+  ]
+ }
+]

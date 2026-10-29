@@ -8,7 +8,7 @@
  * The view file is a thin shell: layout + selection state. The tree,
  * table and map are each their own component.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import {
   GridRow,
@@ -21,12 +21,13 @@ import {
 import { ModelIssue } from '../features/validation/useModelIssues';
 import { DateFormat } from '../features/settings/useSettings';
 import { FileToolbar, FileToolbarProps } from './ModelView.features/FileToolbar';
+import type { PlantChange } from 'lib/build/plants';
+import { CompositeSyncBar } from '../modules/composites/CompositeSyncBar';
+import { OwnedRowsNote } from './ModelView.features/OwnedRowsNote';
 import { SheetTree } from './ModelView.features/SheetTree';
-import { MapPane } from '../features/map/MapPane';
+import { NetworkPane } from '../features/sld/NetworkPane';
 import { TablesPane } from '../features/input/TablesPane';
 import { ResizablePanels } from '../layout/ResizablePanels';
-import { PlantList } from '../features/build/PlantList';
-import type { PlantChange } from 'lib/build/plants';
 
 export interface ModelViewProps extends FileToolbarProps {
   model: WorkbookModel;
@@ -58,19 +59,30 @@ export interface ModelViewProps extends FileToolbarProps {
   dateFormat: DateFormat;
   /** Session series-sheet row counts (temporal sheets live server-side). */
   seriesSheetCounts?: Record<string, number>;
-  /** Apply a plant change set (delete from the plant card). */
+  /** Apply a plant change set (re-derive composites after a RAGNAROK_Composites edit). */
   onApplyPlantChange?: (change: PlantChange, label: string) => void | Promise<void>;
+  /** Open a composite in the Composites tab. */
+  onOpenComposite?: (plantId?: string) => void;
+  /** Open a composite's edit form in a popup over the Model tab. */
+  onEditComposite?: (plantId: string) => void;
 }
 
 export function ModelView(props: ModelViewProps) {
   const [sel, setSel] = usePersistedState<TableSel>('ui:model-sel', { kind: 'static', sheet: 'buses' });
+  // a click in the single-line diagram: a composite opens its edit popup, anything else selects its row in the grid
+  const [diagramJump, setDiagramJump] = useState<{ sheet: string; rowIndex: number } | null>(null);
+  useEffect(() => { setDiagramJump(null); }, [props.jumpTo]);   // a jump requested elsewhere wins over the last diagram click
+  const selectElement = (sheet: string, name: string) => {
+    if (sheet === 'RAGNAROK_Composites' && props.onEditComposite) { props.onEditComposite(name); return; }
+    const rowIndex = (props.model[sheet] ?? []).findIndex((r) => String(r.name ?? '') === name);
+    if (rowIndex >= 0) setDiagramJump({ sheet, rowIndex });
+  };
 
   return (
     <div className="model-view">
       <FileToolbar {...props} />
       <ResizablePanels id="model" direction="horizontal" className="model-columns" initialSizes={[20, 40, 40]} minSize={160}>
         <section className="model-column model-column-tree">
-          {props.onApplyPlantChange && <PlantList model={props.model} onApply={props.onApplyPlantChange} compact />}
           <SheetTree
             model={props.model}
             issues={props.modelIssues}
@@ -80,11 +92,16 @@ export function ModelView(props: ModelViewProps) {
           />
         </section>
         <section className="model-column model-column-table" data-tour="model-table">
+          {props.onApplyPlantChange && <CompositeSyncBar model={props.model} onApply={props.onApplyPlantChange} />}
+          {sel.kind === 'static' && (!sel.sheet.startsWith('RAGNAROK') || sel.sheet === 'RAGNAROK_Composites') && (
+            <OwnedRowsNote sheet={sel.sheet} rows={(props.model[sel.sheet] ?? []) as GridRow[]} onOpenComposite={props.onOpenComposite ? () => props.onOpenComposite?.() : undefined} />
+          )}
           <TablesPane
             model={props.model}
             sel={sel}
             onSelChange={setSel}
             onUpdate={props.onUpdateRow}
+            onOpenOwner={props.onEditComposite}
             onAddRow={props.onAddRow}
             onDeleteRow={props.onDeleteRow}
             onAddColumn={props.onAddColumn}
@@ -99,14 +116,14 @@ export function ModelView(props: ModelViewProps) {
             editableTs
             onBulkPaste={props.onBulkPaste}
             issues={props.modelIssues}
-            jumpTo={props.jumpTo}
+            jumpTo={diagramJump ?? props.jumpTo}
             currencySymbol={props.currencySymbol}
             dateFormat={props.dateFormat}
             showAttrDoc
           />
         </section>
         <section className="model-column model-column-map">
-          <MapPane model={props.model} bounds={props.bounds} busIndex={props.busIndex} />
+          <NetworkPane model={props.model} bounds={props.bounds} busIndex={props.busIndex} onSelect={selectElement} />
         </section>
       </ResizablePanels>
     </div>

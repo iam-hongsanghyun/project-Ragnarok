@@ -186,6 +186,15 @@ def _plant(run: _Run, pid: str, reg: dict[str, Any] | None, include_series: bool
         out["capacityFactor"] = out["generationMwh"] / (cap_el * hours) if cap_el > 0 and hours > 0 else 0.0
         out["fullLoadHours"] = out["generationMwh"] / cap_el if cap_el > 0 else 0.0
         out["revenueAtBusPrice"] = float((gen * price * run.w).sum())
+    if ptype == "p2x" and main and main["sheet"] == "links":
+        # the electrolyser is the main component: its output is the H2 on bus1 (MWh LHV), its input the electricity on bus0 (the size is MW_el)
+        el_in, h2_out = run.col("links-p0", main["name"]), -run.col("links-p1", main["name"])
+        out["generationMwh"] = _energy(run, h2_out)
+        out["electricityInMwh"] = _energy(run, el_in)
+        out["outputCarrier"] = "H2 (MWh LHV)"
+        out["capacityMwEl"] = cap_main
+        out["capacityFactor"] = out["electricityInMwh"] / (cap_main * hours) if cap_main > 0 and hours > 0 else 0.0
+        out["fullLoadHours"] = out["electricityInMwh"] / cap_main if cap_main > 0 else 0.0
     if ptype == "bess" and main:
         ch, dis = _series(run, "storage_units", "p_store", main["name"]), _series(run, "storage_units", "p_dispatch", main["name"])
         e_cap = cap_main * _f(run.row("storage_units", main["name"]).get("max_hours"), 1.0)
@@ -285,7 +294,7 @@ def plant_results(bundle: dict[str, Any], *, plant_id: str | None = None, period
         raise PlantResultsError(str(exc)) from exc
     ids = plant_ids(run.model)
     if not ids:
-        raise PlantResultsError("This run's model has no plants (no `plant` column and no RAGNAROK_PLANTS sheet). Add one from Build -> Generators.")
+        raise PlantResultsError("This run's model has no plants (no `plant` column and no RAGNAROK_PLANTS sheet). Add one from the Composites tab.")
     if plant_id is not None and plant_id not in ids:
         raise PlantResultsError(f"No plant {plant_id!r} in this run. Plants: {ids}.")
     regs = registry_map(run.model)

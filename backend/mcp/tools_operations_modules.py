@@ -10,11 +10,14 @@ Each write is a visible workbook step: the tool says what it changed.
 * ``sample_workbook``             - WRITE (gated, confirm=true): test-run sampling written into the workbook.
 * ``make_noncyclic_for_rolling``  - WRITE (gated, confirm=true): cyclic storage flags false (rolling refuses cyclic storage).
 * ``relax_maintenance``           - WRITE (gated, confirm=true): maintainable = false (Force-LP refuses maintainable units).
+* ``get_demand_response``         - read-only: the ``dr_*`` rows the demand-response module would write, and those it wrote.
+* ``apply_demand_response``       - WRITE (gated, confirm=true): write those rows into the workbook (a disabled config removes them).
 """
 from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp
 from .tools_runspec import _EDIT
 
@@ -41,7 +44,7 @@ async def preview_time_units(scenario: dict[str, Any] | None = None, options: di
 
 
 @mcp.tool(annotations=_EDIT, description=(
-    "Upsert rows of RAGNAROK_TimeUnits: each {component, name, attribute, value, unit}. Examples: {component: 'links', name: 'ccgt', attribute: 'min_up_time', value: 4, unit: 'hours'}, "
+    "Set ramp rates and minimum up / down times (hours, minutes, per minute) of generators, links and CCGT units. Upsert rows of RAGNAROK_TimeUnits: each {component, name, attribute, value, unit}. Examples: {component: 'links', name: 'ccgt', attribute: 'min_up_time', value: 4, unit: 'hours'}, "
     "{component: 'generators', name: 'gas1', attribute: 'ramp_limit_up', value: 0.02, unit: 'per_minute'}. replace=true replaces the whole sheet. The conversion to PyPSA's "
     "per-snapshot values happens at solve time with the run's weights."))
 async def set_time_units(rows: list[dict[str, Any]], replace: bool = False, confirm: bool = False) -> Any:
@@ -60,7 +63,7 @@ async def set_weightings_from_spacing(confirm: bool = False) -> Any:
 
 
 @mcp.tool(annotations=_MUT, description=(
-    "Test-run sampling written into the workbook: the sampled snapshots, their weightings (objective/generators = window hours / kept hours, stores unchanged) and "
+    "Representative-day sampling for a fast test run, written into the workbook: the sampled snapshots, their weightings (objective/generators = window hours / kept hours, stores unchanged) and "
     "the (averaged) series replace the working model. options.samplingConfig = {enabled: true, mode: count|gap|average, blockSize, blockCount, gapSnapshots, "
     "scaleStartUpCosts} plus an optional snapshotStart/snapshotCount window. Applied on confirm."))
 async def sample_workbook(options: dict[str, Any], confirm: bool = False) -> Any:
@@ -87,3 +90,43 @@ async def relax_maintenance(confirm: bool = False) -> Any:
     if _needs_confirm(cheap=False) and not confirm:
         return _preview("Set maintainable = false on every component.", {})
     return await _post("/api/model/relax-maintenance", {})
+
+
+_DR_CONFIG = (
+    "config = options.demandResponseConfig: {enabled, shiftFraction (0-1 of each load's peak), maxShiftHours, elasticEnabled, elasticFraction, wtpMax, "
+    "loads (names; empty = all)}. "
+)
+
+
+@mcp.tool(annotations=_RO, description=(
+    "Demand response as workbook rows: what the module would write for a config (shiftable load: bus dr_<load>, link drlink_<load> from the parent bus with "
+    "p_nom = peak + buffer, cyclic store drstore_<load> with e_nom = buffer x hours, the load moved onto dr_<load>; price-elastic: generators "
+    "load_shedding_elastic_<load>_<k> with a stepped willingness to pay) and the dr_* rows the workbook already has. " + _DR_CONFIG + "Read-only."))
+async def get_demand_response(config: dict[str, Any] | None = None, pathway_config: dict[str, Any] | None = None) -> Any:
+    return await _post("/api/demand-response/preview", {"config": config, "pathwayConfig": pathway_config})
+
+
+@mcp.tool(annotations=_MUT, description=(
+    "Write the demand-response module's rows into the working model (buses / links / stores / loads / generators / carriers), replacing its previous dr_* "
+    "rows; the run then builds what the workbook holds. A config with enabled and elasticEnabled false removes the rows (loads back on their bus). "
+    + _DR_CONFIG + "Without confirm=true it returns the preview."))
+async def apply_demand_response(config: dict[str, Any] | None = None, pathway_config: dict[str, Any] | None = None, confirm: bool = False) -> Any:
+    body = {"config": config, "pathwayConfig": pathway_config}
+    if _needs_confirm(cheap=False) and not confirm:
+        prev = await _post("/api/demand-response/preview", body)
+        return _preview("Write the demand-response rows into the model.", prev)
+    return await _post("/api/demand-response/apply", body)
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "get_time_units": "time_ops",
+    "preview_time_units": "time_ops",
+    "set_time_units": "time_ops",
+    "set_weightings_from_spacing": "time_ops",
+    "sample_workbook": "transforms",
+    "make_noncyclic_for_rolling": "time_ops",
+    "relax_maintenance": "time_ops",
+    "get_demand_response": "policy",
+    "apply_demand_response": "policy",
+})

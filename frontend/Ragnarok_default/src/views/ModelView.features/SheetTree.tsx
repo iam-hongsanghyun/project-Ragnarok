@@ -22,6 +22,14 @@ import { ModelIssue } from '../../features/validation/useModelIssues';
 import { TABLE_GROUPS } from 'lib/constants';
 import { temporalLeaves } from './sheetTreeLeaves';
 
+/** Module sheets users read and edit as ordinary tables (rows only; they are not PyPSA components). */
+export const RAGNAROK_TREE_SHEETS: ReadonlyArray<{ sheet: string; label: string; hint: string }> = [
+  { sheet: 'RAGNAROK_Composites', label: 'Composites', hint: 'One row per composite asset: edit a cell and its sub-components are re-derived' },
+  { sheet: 'RAGNAROK_CompositeTemplates', label: 'Composite templates', hint: 'Saved composite settings to place on other buses' },
+  { sheet: 'RAGNAROK_TimeUnits', label: 'Time units', hint: 'Ramp limits and unit-commitment times, stated in hours' },
+  { sheet: 'RAGNAROK_StartCosts', label: 'Start costs', hint: 'Warm and cold start-cost tiers' },
+];
+
 interface Props {
   model: WorkbookModel;
   issues: ModelIssue[];
@@ -75,6 +83,9 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
     );
   });
 
+  const ragnarokSheets = RAGNAROK_TREE_SHEETS.filter((r) => ((model as unknown as Record<string, GridRow[]>)[r.sheet]?.length ?? 0) > 0
+    && (!navSearch || matchesSearch(r.label) || matchesSearch(r.sheet)));
+
   return (
     <nav className="sheet-tree" aria-label="Component sheets">
       <div className="sheet-tree-header">
@@ -106,7 +117,7 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
       </div>
 
       <div className="sheet-tree-body">
-        {visibleGroups.length === 0 && (
+        {visibleGroups.length === 0 && ragnarokSheets.length === 0 && (
           <p className="sheet-tree-empty">No components with data yet.</p>
         )}
         {visibleGroups.map((g) => {
@@ -175,6 +186,24 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
             </div>
           );
         })}
+        {ragnarokSheets.length > 0 && (
+          <div className="sheet-tree-group" data-testid="ragnarok-sheets">
+            <div className="sheet-tree-group-header" aria-label="Ragnarok sheets">
+              <span className="sheet-tree-group-label">Ragnarok sheets</span>
+              <span className="sheet-tree-count">{ragnarokSheets.length}</span>
+            </div>
+            <div className="sheet-tree-items">
+              {ragnarokSheets.map((r) => (
+                <button key={r.sheet} className={`sheet-tree-item${sel.kind === 'static' && sel.sheet === r.sheet ? ' is-active' : ''}`}
+                  title={r.hint} onClick={() => onSelChange({ kind: 'static', sheet: r.sheet as SheetName })}>
+                  <span className="sheet-tree-item-icon">≡</span>
+                  <span className="sheet-tree-item-label">{r.label}</span>
+                  <span className="sheet-tree-count">{((model as unknown as Record<string, GridRow[]>)[r.sheet] ?? []).length}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </nav>
   );

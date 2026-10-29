@@ -6,6 +6,9 @@
 * ``POST /api/build/plant``                build a plant; ``apply=false`` previews, ``apply=true`` merges it into the session
 * ``POST /api/build/plant/edit``           re-derive a plant's components from its stored spec + a patch (preview / apply)
 * ``POST /api/build/plant/delete``         delete a plant and nothing else; shared buses / carriers are kept (preview / apply)
+* ``POST /api/build/composite/sync``       re-expand composites whose RAGNAROK_Composites sheet row was edited (preview / apply)
+* ``POST /api/build/plant/place``          one composite on several buses: N independent instances (preview / apply)
+* ``POST /api/build/plant/detach``         turn a composite into plain rows (preview / apply)
 * ``GET  /api/build/plant/results/{run}``  results of a stored run grouped by plant id (generation, fuel, H2 share, avoided CO2, starts)
 
 Every write returns a *change set* (``remove`` / ``release`` / ``fragment``, see ``backend/app/plants/registry.py``). With an
@@ -139,7 +142,7 @@ def build_plant(req: PlantRequest) -> dict[str, Any]:
     except registry.PlantError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     change = {"remove": {}, "release": [], "fragment": built["fragment"], "kept": {"buses": [], "carriers": []}}
-    out: dict[str, Any] = {k: built[k] for k in ("plantId", "type", "label", "fragment", "registry", "summary", "warnings", "spec")}
+    out: dict[str, Any] = {k: built[k] for k in ("plantId", "type", "label", "fragment", "registry", "summary", "warnings", "spec", "technologies")}
     out.update({"change": change, "rowCounts": _row_counts(built["fragment"]), "applied": False})
     if req.apply:
         out["write"] = _commit(req.sessionId, model, change)
@@ -156,7 +159,7 @@ def edit_plant(req: EditRequest) -> dict[str, Any]:
         change = catalog.edit_plant(model, req.plantId, req.spec)
     except registry.PlantError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    out = {k: change[k] for k in ("plantId", "type", "registry", "summary", "warnings", "spec", "fragment")}
+    out = {k: change[k] for k in ("plantId", "type", "registry", "summary", "warnings", "spec", "fragment", "technologies")}
     out["label"] = change["registry"]["label"]
     out.update({"change": {k: change[k] for k in ("remove", "release", "fragment", "kept")}, "applied": False,
                 "removed": {s: len(n) for s, n in change["remove"].items()}, "rowCounts": _row_counts(change["fragment"])})
@@ -177,6 +180,74 @@ def delete_plant(req: DeleteRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     out = {"plantId": req.plantId, "change": change, "removed": {s: len(n) for s, n in change["remove"].items()}, "kept": change["kept"],
            "warnings": change["warnings"], "applied": False}
+    if req.apply:
+        out["write"] = _commit(req.sessionId, model, change)
+        out["applied"] = True
+    return out
+
+
+class SyncRequest(BaseModel):
+    sessionId: str = "default"
+    model: dict[str, list[dict[str, Any]]] | None = None
+    apply: bool = False
+
+
+class PlaceRequest(BaseModel):
+    sessionId: str = "default"
+    type: str
+    spec: dict[str, Any] = Field(default_factory=dict, description="The template spec; `bus` and `plantId` are set per instance.")
+    buses: list[str] = Field(default_factory=list, description="Electricity buses to place on: one instance each, named <prefix>_<bus>.")
+    prefix: str | None = None
+    sharePorts: bool = Field(False, description="False = each instance creates its own fuel / H2 / product buses; True = they share the template's (or the first one's).")
+    model: dict[str, list[dict[str, Any]]] | None = None
+    apply: bool = False
+
+
+@router.post("/api/build/composite/sync")
+def sync_composites(req: SyncRequest) -> dict[str, Any]:
+    """Re-expand every composite whose RAGNAROK_Composites row was edited in the sheet (preview; ``apply`` writes the session)."""
+    _inline_guard(req)
+    model = req.model if req.model is not None else _session_model(req.sessionId, full=False)
+    try:
+        out = catalog.sync_composites(model)
+    except registry.PlantError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    out["applied"] = False
+    if out["change"] is not None:
+        out["rowCounts"] = _row_counts(out["change"]["fragment"])
+        if req.apply:
+            out["write"] = _commit(req.sessionId, model, out["change"])
+            out["applied"] = True
+    return out
+
+
+@router.post("/api/build/plant/place")
+def place_plants(req: PlaceRequest) -> dict[str, Any]:
+    """Place one composite on several buses (copy-paste): N independent instances named <prefix>_<bus>; preview unless ``apply``."""
+    _inline_guard(req)
+    model = req.model if req.model is not None else _session_model(req.sessionId, full=False)
+    try:
+        placed = catalog.place_plants(req.type, req.spec, req.buses, model, prefix=req.prefix, share_ports=req.sharePorts)
+    except registry.PlantError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    change = {"remove": {}, "release": [], "fragment": placed["fragment"], "kept": {"buses": [], "carriers": []}}
+    out = {**placed, "change": change, "rowCounts": _row_counts(placed["fragment"]), "applied": False}
+    if req.apply:
+        out["write"] = _commit(req.sessionId, model, change)
+        out["applied"] = True
+    return out
+
+
+@router.post("/api/build/plant/detach")
+def detach_plant(req: DeleteRequest) -> dict[str, Any]:
+    """Turn a composite into plain rows: children keep their values, lose the owner tag; the registry and sheet rows are removed."""
+    _inline_guard(req)
+    model = req.model if req.model is not None else _session_model(req.sessionId, full=False)
+    try:
+        change = catalog.detach_change(model, req.plantId)
+    except registry.PlantError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    out = {"plantId": req.plantId, "change": change, "applied": False}
     if req.apply:
         out["write"] = _commit(req.sessionId, model, change)
         out["applied"] = True

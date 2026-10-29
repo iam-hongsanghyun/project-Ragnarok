@@ -887,7 +887,7 @@ core-to-module import allowlist in both directions (a stale row fails), and fail
 | Module package | Contents | Note |
 |---|---|---|
 | `reserves/` | spinning-reserve variable, headroom and requirement constraints; the `reserve` block | `options.reserveConfig` |
-| `constraints/` | custom constraints, the DSL, `constraintSpecs`, `constraint_checks` | declared linopy constraints; **not routed to native `GlobalConstraint`** (see below) |
+| `constraints/` | custom constraints, the DSL, `constraintSpecs`, `constraint_checks` | kinds PyPSA's `GlobalConstraint` expresses exactly are written as native rows (`native_routing.py`, §8.5); the rest are declared linopy constraints |
 | `stochastic/` | scenario overrides, collapse to the representative scenario, duals divided by the probability, `GlobalConstraint.mu` recovery | `set_scenarios` / `set_risk_preference` stay native |
 | `demand_response/` | shiftable and price-elastic rewiring (DR bus + Link + Store), `demandResponse` / `priceElastic` blocks | a declared, reported build step (the `dr_*` components are not yet written to the workbook) |
 | `p2x/rfnbo.py`, `plants/cofiring.py`, `plants/startcosts.py` | RFNBO matching, co-firing blend share, hot / warm / cold start-cost tiers | `constraints` hooks of the p2x and plants modules |
@@ -904,9 +904,10 @@ The old paths (`backend/pypsa/results/<study>.py`, `network/{reserves,rfnbo,cofi
 `stochastic.py`, `model_check.py`, `utils/emissions.py`, `results/{emissions,diagnostics}.py`) are one-line `sys.modules` shims onto the new modules, kept for plugins, MCP and
 older tests; new code imports the real module. Not moved: `forge_helpers.py` (already a visible Forge module), MGA (a native `optimize_mga` path), power flow and contingency (native solves).
 
-**Constraint kinds PyPSA could express** (`tech_capacity_expansion_limit`, per-bus-carrier nominal limits, `operational_limit`, `primary_energy`) are **not** routed to
-`global_constraints` rows: routing moves the reported dual from the constraint name (`appliedConstraints`) to `global_constraints.mu` and changes the rolling-window
-apportioning. That is a follow-up with its own dual-parity test, not part of this mechanical step.
+**Constraint kinds PyPSA expresses** are routed to native `global_constraints` rows by the `constraints` module (§8.5): carrier energy limits and the load-shed cap
+(`operational_limit`), carrier capacity limits (`tech_capacity_expansion_limit`) and a bare DSL `emissions` cap (`primary_energy`), each only when the native row is
+provably the same constraint; the kinds PyPSA has no type for (intensity, shares, capacity factors, multi-term lines) and the runs where the native row would differ
+(rolling, pathway, stochastic) keep the declared linopy constraint. The `primary_energy` / `operational_limit` rows of the workbook sheet were always native.
 
 ## 6. Result extraction
 
@@ -1046,7 +1047,9 @@ Returns:
 
 **`build_applied_constraints(network) -> list[dict]`**
 
-Returns custom and global constraints registered on the solved network.
+Returns custom and global constraints registered on the solved network: the declared linopy constraints (`cc_*`, `dsl_*` / `spec_*`, plugins) with their dual, and the
+custom / DSL constraints routed to native rows (§8.5, same `cc_` / `spec_` / `dsl_` name, `native: true`) with `shadowPrice` = `global_constraints.mu`. A routed
+constraint is listed once, with the same `shadowPrice` sign and unit it had as a linopy row.
 
 ### 6.6 `summaries.py`
 
@@ -1306,6 +1309,32 @@ Supported metrics:
 | `carrier_min_share` | Σ(carrier) - (value/100)·Σ(all supply) >= 0 | `value` in %. |
 | `carrier_max_cf` | Σ(carrier dispatch) <= (value/100)·capacity·hours | Handles extendable capacity via `Generator-p_nom` linopy variable. |
 | `carrier_min_cf` | Σ(carrier dispatch) >= (value/100)·capacity·hours | Same capacity handling as max. |
+
+### 8.5 Native routing (`constraints/native_routing.py`)
+
+`_prepare` of the constraints hook (once per run, on the built network, before the solve) reduces every enabled structured constraint, `constraintSpecs` entry or DSL
+line (same precedence as the linopy path) to `atom(carrier) <sense> K` (one atom, any coefficient, constants on either side) and writes it as
+`n.add("GlobalConstraint", <linopy name>, ...)` when PyPSA's row is the same constraint. The linopy path then skips that index (`n.meta["ragnarok_native_constraints"]`
+lists the routed rows). The run notes say `... added as native GlobalConstraint 'cc_0_carrier_max_gen' (operational_limit, carrier_attribute=gas, <= 300 MWh)`; the rows
+are written at solve time to the network, not to the workbook (the constraint belongs to the scenario, not to the model).
+
+| User constraint | Native row | Same constraint when |
+|---|---|---|
+| `carrier_max_gen` / `carrier_min_gen`, DSL `gen(C) <op> K` | `operational_limit`, `carrier_attribute = C`, `constant = K` (MWh, `generators` weighting) | the constraint's generators are all generators of carrier C (all active) and no non-cyclic storage unit or store has carrier C (PyPSA adds their net depletion) |
+| `max_load_shed`, DSL `load_shed <op> K` | `operational_limit` on the shedding carrier | the shedding generators are all generators of that carrier (same storage rule) |
+| `carrier_max_cap` / `carrier_min_cap`, DSL `cap(C) <op> K` | `tech_capacity_expansion_limit`, `constant = K` minus the fixed `p_nom` of C (PyPSA sums only extendable capacity) | at least one generator of C is extendable and no extendable line, link, transformer, store or storage unit has carrier C |
+| DSL `emissions <op> K` (bare) | `primary_energy` on `co2_emissions` | same emitting generators (none negative, no emitting shedding generator), static efficiency above the floor and no efficiency time series or piecewise curve, no non-cyclic storage of an emitting carrier |
+
+Required of every routed row: a single-period, single-scenario, non-rolling run. PyPSA multiplies `primary_energy` / `operational_limit` by the investment-period
+`years`, refuses `tech_capacity_expansion_limit` with scenarios, and applies one constant to every rolling window; the linopy rows have none of those, so the exact
+form there is the linopy row. Not routable: `co2_cap` (intensity), `*_share`, `*_cf`, `*_cap_share`, DSL lines with several atoms or carriers, a column selector,
+`gen` / `cap` over all supply, `emissions(C)`. Routing is conservative: any doubt keeps the linopy path, so no feasible set changes.
+
+**Dual mapping.** `n.global_constraints.mu` is the linopy dual of the same row: identical sign (minimisation: a `<=` row that binds has a negative dual, a `>=` row a
+positive one) and unit (currency per MWh, per MW, per tCO2), no scaling in a single-period run; PyPSA's own period weighting would enter only in the pathway runs that are
+not routed. `build_applied_constraints` reads `mu` for routed rows and the linopy dual for the others, so `shadowPrice` is unchanged. One visible difference: a routed
+`emissions` cap is a CO2 `GlobalConstraint`, so `co2Shadow` (which looks at global constraints first) now reports it (in kt, as for any CO2 budget); before it reported
+only `co2_cap` intensity rows. Test: `test_native_constraint_routing.py` (each routed kind solved both ways: equal objective and equal dual, to 1e-9).
 
 ### 8.2 `apply_constraint_specs` — JSON spec wire format
 

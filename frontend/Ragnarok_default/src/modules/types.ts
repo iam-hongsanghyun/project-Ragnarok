@@ -22,7 +22,7 @@ export type TabModuleId =
   | 'PhysicalRisk'
   | 'Siting'
   | 'Screening'
-  | 'P2X'
+  | 'Composites'
   | 'PostAnalysis'
   | 'Reporting'
   | 'Training';

@@ -392,7 +392,13 @@ def build_chain(spec_in: dict[str, Any] | None, model: Model) -> dict[str, Any]:
         meta = PRODUCTS[prod]
         pp = P[meta["tech"]]
         h = pp["h2_input"]
-        pbus = new_bus(f"{prod}", meta["bus_carrier"])
+        given = (spec.get("productBuses") or {}).get(prod)
+        if given:
+            if not any(str(b.get("name")) == str(given) for b in buses):
+                raise ValueError(f"{prod} bus {given!r} not found in the model.")
+            pbus = bus_names[prod] = str(given)
+        else:
+            pbus = new_bus(f"{prod}", meta["bus_carrier"])
         feed_bus = bus_names["n2"] if meta["feed"] == "n2" else bus_names["co2"]
         feed_in = pp["n2_input"] if meta["feed"] == "n2" else pp["co2_input"]
         carrier(meta["link_carrier"])

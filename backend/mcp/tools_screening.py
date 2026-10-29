@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp
 
 _MAX_LIST = 200  # most per-pair / per-lag values echoed back inline
@@ -198,7 +199,7 @@ async def delete_siting_dataset(dataset_id: str, confirm: bool = False) -> Any:
 @mcp.tool(
     annotations=_RO,
     description=(
-        "Site-by-site correlation matrix (Pearson or Spearman) of a screening dataset on a chosen basis, plus every "
+        "Which wind or solar sites are correlated or complementary: site-by-site correlation matrix (Pearson or Spearman) of a screening dataset on a chosen basis, plus every "
         "site pair's distance (haversine km) vs correlation, plus optional correlation with a reference. "
         + _BASIS_HELP
         + " anomaly=true correlates hourly anomalies (month-hour cycle removed) so two solar sites do not look alike "
@@ -302,7 +303,7 @@ async def siting_profiles(
 @mcp.tool(
     annotations=_RO,
     description=(
-        "Complementarity metrics of a weighted portfolio of sites (weights {site: w}, normalised to sum 1): mean CF, "
+        "How complementary are wind and solar sites: complementarity metrics of a weighted portfolio of sites (weights {site: w}, normalised to sum 1): mean CF, "
         "std, coefficient of variation, P10/P50/P90 output (exceedance: P90 is exceeded 90 % of hours), share of "
         "hours below low_threshold, ramp std / max, diversification ratio, loss of output in the worst N hours, "
         "per-site rows, coincident-low-output probability per pair (with the independent expectation), ramp "
@@ -333,7 +334,7 @@ async def siting_portfolio_metrics(
 @mcp.tool(
     annotations=_RO,
     description=(
-        "Long-only portfolio optimiser over the chosen sites (weights >= 0, sum 1). objective 'min_variance' "
+        "Choose the best mix of complementary wind / solar sites: long-only portfolio optimiser over the chosen sites (weights >= 0, sum 1). objective 'min_variance' "
         "(optionally at least target_mean_cf) or 'max_mean' (needs variance_cap in CF^2). max_weight caps one site; "
         "region_caps {region: max total weight} uses the regions of the site table. Infeasible targets / caps return "
         "an error stating the reachable value. Returns weights, mean CF, std, the full metrics of the result and an "
@@ -505,3 +506,21 @@ async def promote_siting_sites(
     res.pop("meta", None)
     return res
 
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "list_siting_datasets": "siting",
+    "get_siting_dataset": "siting",
+    "validate_siting_dataset": "siting",
+    "upload_siting_dataset": "siting",
+    "delete_siting_dataset": "siting",
+    "siting_correlation": "siting",
+    "siting_lagged_correlation": "siting",
+    "siting_profiles": "siting",
+    "siting_portfolio_metrics": "siting",
+    "siting_optimise_portfolio": "siting",
+    "siting_cluster_sites": "siting",
+    "siting_region_series": "siting",
+    "siting_region_structure": "siting",
+    "promote_siting_sites": "siting",
+})

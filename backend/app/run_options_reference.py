@@ -142,7 +142,7 @@ _BLOCK_INFO: dict[str, tuple[str, str]] = {
     "assetSwapConfig": ("Asset-swap / repowering what-if: retire matched generators, add a replacement, compare before/after.", "backend/pypsa/results/asset_swap.py"),
     "essConfig": ("ESS business case: sweep battery sizes against arbitrage on the run's prices; NPV / IRR / payback per size.", "backend/pypsa/results/ess.py"),
     "ppaConfig": ("PPA contract valuation: fixed-price CfD vs the run's LMP, both sides.", "backend/pypsa/results/ppa.py"),
-    "demandResponseConfig": ("Demand response: shiftable load (energy conserved) and optional price-elastic demand.", "backend/pypsa/network/demand_response.py"),
+    "demandResponseConfig": ("Demand response: shiftable load (energy conserved) and optional price-elastic demand. The visible step POST /api/demand-response/apply writes the dr_* rows into the workbook and the run builds them; a workbook without those rows is rewired at build time (legacy, said in the notes).", "backend/app/demand_response"),
     "financeConfig": ("Optional debt assumptions for the company-finance DSCR. gearing 0 = all equity.", "backend/pypsa/results/finance.py"),
 }
 

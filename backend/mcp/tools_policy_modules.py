@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp
 from .tools_runspec import _EDIT
 
@@ -29,7 +30,7 @@ async def get_carbon_price(price: float = 0.0, schedule: list[dict[str, Any]] | 
 
 
 @mcp.tool(annotations=_EDIT, description=(
-    "Set the carbon price of a saved scenario preset (the module's input): price (currency/tCO2) and optionally a year -> price schedule that supersedes it. "
+    "Set the carbon price (탄소 가격, CO2 price / tax, currency per tCO2) of a saved scenario preset (the module's input): price (currency/tCO2) and optionally a year -> price schedule that supersedes it. "
     "Runs read it on submit_scenario / submit_solve."))
 async def set_carbon_price(scenario_id: str, price: float, schedule: list[dict[str, Any]] | None = None, confirm: bool = False) -> Any:
     fields: dict[str, Any] = {"carbonPrice": price}
@@ -49,7 +50,7 @@ async def get_annual_budgets(pathway_config: dict[str, Any] | None = None) -> An
 
 
 @mcp.tool(annotations=_EDIT, description=(
-    "Add or replace one annual budget: component generators | global_constraints, name, attribute e_sum_max | e_sum_min | constant, annual (per year, in the "
+    "Cap or floor the annual energy (TWh) or CO2 emissions of a generator or carrier (annual budget). Add or replace one annual budget: component generators | global_constraints, name, attribute e_sum_max | e_sum_min | constant, annual (per year, in the "
     "attribute's unit). The horizon value reaches PyPSA at run time; apply_annual_budgets writes it into the workbook rows."))
 async def set_annual_budget(component: str, name: str, attribute: str, annual: float, confirm: bool = False) -> Any:
     body = {"component": component, "name": name, "attribute": attribute, "annual": annual}
@@ -66,3 +67,13 @@ async def apply_annual_budgets(pathway_config: dict[str, Any] | None = None, con
         prev = await _post("/api/annual-budgets/preview", {"pathwayConfig": pathway_config})
         return _preview("Write the annual-budget horizon values into the model.", prev)
     return await _post("/api/annual-budgets/apply", {"pathwayConfig": pathway_config})
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "get_carbon_price": "policy",
+    "set_carbon_price": "policy",
+    "get_annual_budgets": "policy",
+    "set_annual_budget": "policy",
+    "apply_annual_budgets": "policy",
+})

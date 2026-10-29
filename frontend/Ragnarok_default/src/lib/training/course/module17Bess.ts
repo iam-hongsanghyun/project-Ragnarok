@@ -71,7 +71,7 @@ export const MODULE_17_BESS: TutorialStep[] = [
     ],
     explain: [
       'Load the prebuilt model. Settings → Simulation window should cover all 72 snapshots, and the '
-      + 'resolution stays 1 h. Validate and run; one solve of a three-day LP is instant.',
+      + 'resolution stays 1 h. Open Run and press Run model; one solve of a three-day LP is instant.',
 
       'Read it before changing anything. Total cost 997,894. The KPI strip\'s Min · Max price reads 0 · '
       + '140 and the load-weighted average 71.4. Renewables supply 36.4% of the energy served.',
@@ -109,7 +109,7 @@ export const MODULE_17_BESS: TutorialStep[] = [
       },
     ],
     run: {
-      label: 'Run dialog → Validate, then Run model',
+      label: 'Run dialog → Run model',
       detail: ['72 snapshots, one bus, no storage — an instant solve.'],
       expect: 'Total cost 997,894; prices 0 · 140; 4,463 MWh of solar curtailed; the peaker runs 831 MWh.',
     },

@@ -1,0 +1,27 @@
+/* Single-line diagram pane. Drawing colours live in SingleLineDiagram.tsx (literals, so the exported SVG is self-contained). */
+.sld { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.sld-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: var(--fs-xs); }
+.sld-spacer { flex: 1 1 auto; }
+.sld-count { color: var(--muted); font-family: var(--font-mono); }
+.sld-check, .sld-select { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+.sld-select select { font-size: var(--fs-xs); }
+.sld-btn { padding: 3px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-family: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.sld-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.sld-btn:disabled { opacity: 0.5; cursor: default; }
+.sld-frame { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: #ffffff; touch-action: none; cursor: grab; user-select: none; }
+.sld-frame:active { cursor: grabbing; }
+.sld-svg { display: block; }
+.sld-notice { padding: 20px; max-width: 520px; color: var(--text-secondary); font-size: var(--fs-sm); }
+.sld-notice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+.sld-tip { position: absolute; z-index: 5; pointer-events: none; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--text); color: var(--surface); font-size: var(--fs-xs); line-height: 1.4; white-space: nowrap; }
+.sld-tip-title { font-weight: 600; }
+.sld-foot { position: absolute; left: 8px; bottom: 6px; color: var(--muted); font-size: var(--fs-xs); background: rgba(255, 255, 255, 0.85); padding: 1px 6px; }
+
+/* Network pane switch (Map | Single-line diagram) */
+.network-switch { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.network-switch-bar { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--border); }
+.network-switch-group { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.network-switch-btn { padding: 3px 12px; border: 0; background: var(--surface); color: var(--text-secondary); font-family: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.network-switch-btn + .network-switch-btn { border-left: 1px solid var(--border-strong); }
+.network-switch-btn[aria-pressed="true"] { background: var(--brand); color: #ffffff; }
+.network-switch-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }

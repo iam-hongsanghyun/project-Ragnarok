@@ -72,7 +72,7 @@ const CORE_ENTRIES: Entry[] = [
     </>),
   },
   {
-    id: 'Settings', label: 'Settings', hint: 'Run setup & preferences', order: 50,
+    id: 'Settings', label: 'Settings', hint: 'Run setup & preferences', order: Number.MAX_SAFE_INTEGER, // always last
     // A gear.
     icon: lineIcon(<>
       <circle cx="10" cy="10" r="2.4" />

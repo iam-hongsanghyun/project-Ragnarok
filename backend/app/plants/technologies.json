@@ -98,23 +98,23 @@
    "value": 0.0,
    "unit": "efficiency points (per unit) lost per unit energy share of H2",
    "source": {
-    "document": "none: no citable source for an H2 derate of gas turbines was available to this build (2026-10-29)",
-    "locator": "Zero is a documented placeholder, not a finding. Manufacturer and peer-reviewed figures exist but were not available as exact, citable values (document, table / page, retrieval date); none is invented here.",
+    "document": "no per-blend OEM or measured table available to this build (2026-10-29); evidence in locator",
+    "locator": "Zero is a documented assumption, not a quoted figure. Literature search 2026-10-29: no source reached reports an efficiency LOSS with H2; a modelled 1650 C-class combined cycle at fixed turbine inlet temperature gains about +0.72 efficiency points at 100 % H2 (+0.42 at constant output) (Jeong et al., Case Studies in Thermal Engineering, 2024, https://doaj.org/article/032dfd635322486496756d6d617a4d02; read at abstract level only, per-blend tables not read). Per-blend OEM tables (GE GEA33861, ETN hydrogen gas turbine report) were not retrieved.",
     "year": 2030
    },
    "verified": "assumption",
-   "note": "PLACEHOLDER = 0 (derate off). No citable source for the efficiency derate of a gas turbine versus H2 volume share was found, so no number is entered (2026-10-29). To run a sensitivity, override this key per plant (params: {'fuels.h2_derate_efficiency_per_share': value}) with an OEM or peer-reviewed figure and record its source (document, table / page, retrieval date) here. Effect when set: efficiency = rated - this x H2 energy share (simple mode: the fixed share; fuel network: the maximum share)."
+   "note": "0 = derate off (assumption). The evidence found points to no efficiency loss with H2 (a small gain in modelled combined cycles), so 0 is the conservative default; no per-blend table was available (2026-10-29). To run a sensitivity, override this key per plant (params: {'fuels.h2_derate_efficiency_per_share': value}) with an OEM or peer-reviewed figure and record its source (document, table / page, retrieval date) here. Effect when set: efficiency = rated - this x H2 energy share (simple mode: the fixed share; fuel network: the maximum share)."
   },
   "h2_derate_capacity_per_share": {
    "value": 0.0,
    "unit": "per unit of rated MW_el lost per unit energy share of H2",
    "source": {
-    "document": "none: no citable source for an H2 derate of gas turbines was available to this build (2026-10-29)",
-    "locator": "Zero is a documented placeholder, not a finding. Manufacturer and peer-reviewed figures exist but were not available as exact, citable values (document, table / page, retrieval date); none is invented here.",
+    "document": "no per-blend OEM or measured table available to this build (2026-10-29); evidence in locator",
+    "locator": "Zero is a documented assumption, not a quoted figure. Literature search 2026-10-29: no source reached reports an output derate at 0-30 vol % H2 (Mitsubishi M501G at Plant McDonough ran about 20.9 vol % with no derate reported: https://www.power-eng.com/hydrogen/taking-dln-gas-turbine-hydrogen-blending-to-the-next-level/); a modelled combined cycle at fixed turbine inlet temperature gains about +2.9 % output at 100 % H2 (Jeong et al. 2024, abstract level), while holding gas-turbine output fixed lowers steam-turbine output (magnitude not obtained). The sign depends on the control strategy.",
     "year": 2030
    },
    "verified": "assumption",
-   "note": "PLACEHOLDER = 0 (derate off). No citable source for the capacity derate of a gas turbine versus H2 volume share was found, so no number is entered (2026-10-29). To run a sensitivity, override this key per plant (params: {'fuels.h2_derate_capacity_per_share': value}) with an OEM or peer-reviewed figure and record its source (document, table / page, retrieval date) here. Effect when set: p_nom is multiplied by 1 - this x H2 energy share (same share convention)."
+   "note": "0 = derate off (assumption). No source found reports an output derate at the blends used here (up to about 30 vol %, about 11 % of the energy); at high blends the sign depends on the control strategy (2026-10-29). To run a sensitivity, override this key per plant (params: {'fuels.h2_derate_capacity_per_share': value}) with an OEM or peer-reviewed figure and record its source (document, table / page, retrieval date) here. Effect when set: p_nom is multiplied by 1 - this x H2 energy share (same share convention)."
   }
  },
  "technologies": {

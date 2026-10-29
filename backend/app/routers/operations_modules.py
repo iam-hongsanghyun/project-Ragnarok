@@ -11,6 +11,9 @@ endpoints of those modules (each one changes the session workbook and says what 
 * ``POST /api/transform/sample`` - test-run sampling written into the workbook (sampled snapshots, weightings, series).
 * ``POST /api/model/make-noncyclic`` - the rolling-horizon step: every cyclic storage flag False.
 * ``POST /api/model/relax-maintenance`` - the Force-LP companion step: ``maintainable`` False.
+* ``POST /api/demand-response/preview`` - the ``dr_*`` rows the demand-response module would write. Read-only.
+* ``POST /api/demand-response/apply`` - write them (buses / links / stores / loads / generators / carriers);
+  a disabled config removes the module's rows.
 """
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ from ...pypsa.network import time_units
 from ...pypsa.network.force_lp import relax_maintenance
 from ...pypsa.rolling import make_noncyclic
 from ...pypsa.utils.weightings import set_weightings_from_spacing
-from .. import model_store
+from .. import demand_response, model_store
 from ..run_options_reference import RunOption, register_options
 
 router = APIRouter(tags=["operations-modules"])
@@ -147,3 +150,37 @@ def relax_maintenance_step(body: SessionBody) -> dict[str, Any]:
     if sheets:
         model_store.merge_static_model(body.sessionId, sheets)
     return {"changed": changed, "sheetsWritten": sorted(sheets)}
+
+
+# ── demand response (rows written into the workbook) ─────────────────────────────────────
+
+class DemandResponseBody(SessionBody):
+    config: dict[str, Any] | None = None
+    pathwayConfig: dict[str, Any] | None = None
+
+
+def _dr_rows(body: DemandResponseBody) -> tuple[dict[str, Any], dict[str, Any]]:
+    model = _model(body.sessionId)
+    options = {"pathwayConfig": body.pathwayConfig} if body.pathwayConfig else None
+    try:
+        return model, demand_response.compute_rows(model, body.config, options)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/demand-response/preview")
+def demand_response_preview(body: DemandResponseBody) -> dict[str, Any]:
+    """The rows the module would write for ``config``, the rows it already wrote, and the sheets that would change."""
+    model, out = _dr_rows(body)
+    return {"existing": demand_response.workbook_rows(model), "rows": out["rows"], "removed": out["removed"],
+            "sheets": out["sheets"], "notes": out["notes"]}
+
+
+@router.post("/api/demand-response/apply")
+def demand_response_apply(body: DemandResponseBody) -> dict[str, Any]:
+    """Write the module's rows into the session workbook (previous ``dr_*`` rows replaced)."""
+    _model_in, out = _dr_rows(body)
+    sheets = {sheet: out["model"].get(sheet) or [] for sheet in out["sheets"]}
+    if sheets and model_store.merge_static_model(body.sessionId, sheets) is None:
+        raise HTTPException(status_code=400, detail="No session to write into.")
+    return {"rows": out["rows"], "removed": out["removed"], "sheetsWritten": sorted(sheets), "notes": out["notes"]}

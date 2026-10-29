@@ -2718,7 +2718,7 @@ def test_module_19_checkpoint_is_what_the_steps_build(tmp_path: Path) -> None:
     """The finished example is the start model after the module's plant edits, row for row."""
     built = json.loads(_m19_model_json("warm"))
     checkpoint = _model_from_example("training_m19", tmp_path)
-    assert set(built) == set(checkpoint)
+    assert set(built) - {"RAGNAROK_Composites"} == set(checkpoint)       # the bundled example predates the instance sheet (sync adds the row)
     for sheet in checkpoint:
         if sheet == "RAGNAROK_PLANTS":
             continue
@@ -2735,6 +2735,20 @@ def test_module_19_kpi_strip_strings_the_lessons_quote() -> None:
     for (step, pipe), total in expected.items():
         model, res, _ = _m19(step, pipeline_mw=pipe)
         assert _kpis(model, res)["totalCost"] == total, (step, pipe)
+
+
+def test_module_19_kpi_renewable_share_counts_cofired_output_as_non_renewable() -> None:
+    """The cofire turbine is a Link whose carrier (CCGT) has no co2_emissions; its 10,181 MWh is converted
+    fuel, so the share is solar / (solar + CCGT + oil) = 3,710 / 15,075, not the 92.1 % it read before."""
+    from backend.app import results_derived as rd
+
+    model, res, _ = _m19("warm")
+    converted = rd._converted_carriers(model)
+    assert converted == {"gas feed", "H2 feed", "CCGT"}
+    before = rd.compute_kpis(res, model["carriers"], set(), "$", list)["renewableSharePct"]
+    after = rd.compute_kpis(res, model["carriers"], set(), "$", list, converted_carriers=converted)["renewableSharePct"]
+    assert before == pytest.approx(92.1467, abs=1e-3)
+    assert after == pytest.approx(24.6124, abs=1e-3)
 
 
 # ── The checkpoints the course references must exist and be loadable ─────────

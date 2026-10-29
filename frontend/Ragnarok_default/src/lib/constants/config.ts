@@ -24,6 +24,7 @@ export interface SettingsDefaultsConfig {
   queuePollSeconds: number;
   /** Comma-separated TabModuleIds (see src/modules/registry). */
   enabledModules: string;
+  seenModules?: string;
 }
 
 export const APP_CONFIG: AppConfig = appConfigJson;

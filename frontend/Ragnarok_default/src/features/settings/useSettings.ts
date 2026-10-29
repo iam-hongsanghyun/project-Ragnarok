@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { AppSettings } from 'lib/settings/types';
 import { SETTINGS_CONFIG, SETTINGS_DEFAULTS } from 'lib/constants';
+import { reconcileEnabledModules } from '../../modules/registry';
 
 export type { DateFormat, SolveAcceptance, SolverType, AppSettings } from 'lib/settings/types';
 
@@ -43,11 +44,12 @@ function loadSettings(): AppSettings {
         queuePollSeconds: parsed.queuePollSeconds ?? SETTINGS_DEFAULTS.queuePollSeconds,
         // Settings saved before tab-modules existed lack the key — default to
         // every module, the pre-modules behaviour ('' is a deliberate "none").
-        enabledModules:
-          typeof parsed.enabledModules === 'string'
-            ? parsed.enabledModules
-            : SETTINGS_DEFAULTS.enabledModules,
+        ...reconcileEnabledModules(
+          typeof parsed.enabledModules === 'string' ? parsed.enabledModules : SETTINGS_DEFAULTS.enabledModules,
+          typeof parsed.seenModules === 'string' ? parsed.seenModules : undefined,
+        ),
       };
+      if (settings.enabledModules !== parsed.enabledModules || settings.seenModules !== parsed.seenModules) migrated = true;
       // Persist only when the migration actually changed the value, so the
       // run payload (which reads from here) sends 'auto' even if the user
       // never opens Settings.

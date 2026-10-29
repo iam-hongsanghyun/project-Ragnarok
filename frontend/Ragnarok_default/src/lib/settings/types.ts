@@ -43,4 +43,7 @@ export interface AppSettings {
    *  key/value RAGNAROK_Settings sheet of a project export. Parse with
    *  `parseEnabledModules` (src/modules/registry). Core tabs are unaffected. */
   enabledModules: string;
+  /** Comma-separated TabModuleIds the user has already been offered. A registered module missing from it is switched on once
+   *  (`reconcileEnabledModules`), so a module added later is not hidden by a list saved earlier; one the user turned off stays off. */
+  seenModules?: string;
 }

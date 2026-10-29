@@ -74,6 +74,8 @@ import { CapacityExpansionCard } from '../../../features/analytics/cards/Capacit
 import { CapacityByPeriodCard } from '../../../features/analytics/cards/CapacityByPeriodCard';
 import { PathwayOverviewCard } from '../../../features/analytics/cards/PathwayOverviewCard';
 import { AnnualBudgetsCard } from '../../../features/analytics/cards/AnnualBudgetsCard';
+import { CompositesCard } from '../../../features/analytics/cards/CompositesCard';
+import { CostBreakdownCard } from '../../../features/analytics/cards/CostBreakdownCard';
 import { CarrierAnalysisCard } from '../../../features/analytics/cards/CarrierAnalysisCard';
 import { LoadAnalysisCard } from '../../../features/analytics/cards/LoadAnalysisCard';
 import { StochasticScenariosCard } from '../../../features/analytics/cards/StochasticScenariosCard';
@@ -650,6 +652,10 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">Pathway not enabled.</p>;
         case 'annual-budgets':
           return <AnnualBudgetsCard runName={runName} />;
+        case 'composites':
+          return <CompositesCard runName={runName} period={selectedPeriod} currencySymbol={currencySymbol} />;
+        case 'cost-breakdown':
+          return <CostBreakdownCard results={results} currencySymbol={currencySymbol} />;
         case 'carrier-analysis':
           return <CarrierAnalysisCard runName={runName} period={selectedPeriod} currencySymbol={currencySymbol} />;
         case 'load-analysis':
@@ -735,6 +741,8 @@ export function AnalyticsDashboard({
       case 'capacity-by-period': return 'Capacity by period';
       case 'pathway-overview': return 'Pathway: all periods';
       case 'annual-budgets': return 'Annual budgets (budget, achieved, dual)';
+      case 'composites': return 'Composites (output, starts, BESS cycles, H2 share, LCOH)';
+      case 'cost-breakdown': return 'Cost breakdown';
       case 'carrier-analysis': return 'Carrier performance';
       case 'load-analysis': return 'Load analysis';
       case 'stochastic-scenarios': return 'Stochastic scenarios';

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp
 
 _COST_NOTE = (
@@ -230,3 +231,13 @@ async def clear_piecewise_curve(
 )
 async def check_piecewise_options(piecewise_options: list[dict[str, Any]]) -> Any:
     return await get_client().piecewise_options_check(piecewise_options)
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "describe_piecewise": "build",
+    "get_piecewise_curve": "build",
+    "set_piecewise_curve": "build",
+    "clear_piecewise_curve": "build",
+    "check_piecewise_options": "run",
+})

@@ -6,8 +6,8 @@ JSON ``constraintSpecs`` from the Constraints tab, each apportioned to the optim
 horizon - is a *declared* ``extra_functionality`` contribution added to the linopy model (a ``constraints``
 hook), reported with its dual in ``appliedConstraints``.
 
-Not routed to native ``GlobalConstraint`` rows: the kinds PyPSA could express (``tech_capacity_expansion_limit``,
-per-bus-carrier nominal limits, ``operational_limit``, ``primary_energy``) keep their linopy constraint here,
-because the reported dual would move from the constraint name to ``global_constraints.mu`` and the window
-apportioning would change. That is a tracked follow-up (docs/TODO.md), not part of the mechanical extraction.
+Kinds PyPSA's ``GlobalConstraint`` expresses exactly (carrier energy limit, load-shed cap, carrier capacity limit,
+a bare DSL ``emissions`` cap) are written as native rows by :mod:`.native_routing` and their dual is
+``global_constraints.mu``; every other kind, and every run where the native row would differ (rolling, pathway,
+stochastic), keeps its linopy constraint. See docs/backend.md section 8.5.
 """

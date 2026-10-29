@@ -13,7 +13,7 @@ export const PLANT_COLUMN = 'plant';
 const BUS_COLUMNS = ['bus', 'bus0', 'bus1', 'bus2', 'bus3', 'bus4', 'bus5'];
 const NOT_COMPONENTS = new Set(['snapshots', 'network']);
 /** Registry sheets: tagged with the plant id too, but they are bookkeeping, not components. */
-const REGISTRY_SHEETS = new Set(['RAGNAROK_PLANTS', 'RAGNAROK_P2X']);
+const REGISTRY_SHEETS = new Set(['RAGNAROK_PLANTS', 'RAGNAROK_P2X', 'RAGNAROK_Composites', 'RAGNAROK_CompositeTemplates']);
 
 export interface PlantComponent { sheet: string; name: string; role: string; present: boolean }
 

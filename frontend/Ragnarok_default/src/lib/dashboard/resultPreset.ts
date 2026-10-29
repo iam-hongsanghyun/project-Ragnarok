@@ -8,7 +8,7 @@
  * etc.). Once the user saves a custom layout, this builder is no
  * longer consulted — the stored layout wins.
  */
-import { RunResults, ChartSectionConfig } from 'lib/types';
+import { RunResults, ChartSectionConfig, WorkbookModel } from 'lib/types';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
 import { dualSheetsOf } from 'lib/results/dualViews';
 import { Card, DashboardLayout, PivotChartConfig } from './types';
@@ -80,7 +80,7 @@ function makePivot(patch: Partial<PivotChartConfig>): Card {
   return { id: id('pivot'), kind: 'pivot', config: pivotConfig(patch) };
 }
 
-export function buildResultPreset(results: RunResults): DashboardLayout {
+export function buildResultPreset(results: RunResults, model?: WorkbookModel | null): DashboardLayout {
   // Network-analysis runs (power flow / N-1 contingency) carry no optimise data
   // (dispatch / cost / price), so the standard charts would be empty. Give them
   // a focused layout: KPIs + the study card + the map.
@@ -129,6 +129,8 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     (results.storageSeries?.some((p) => p.charge > 0 || p.discharge > 0 || p.state > 0) ?? false);
   const hasPathway   = !!results.pathway?.enabled;
   const hasAnnualBudgets = !!(results.annualBudgets && results.annualBudgets.length > 0);
+  const hasComposites = (model?.RAGNAROK_PLANTS?.length ?? 0) > 0;
+  const hasCostBreakdown = (results.costBreakdown ?? []).some((l) => l.value !== 0);
   const hasExpansion = !!(results.expansionResults && results.expansionResults.length > 0);
   const hasStoch     = !!results.stochastic?.enabled;
   const hasEmissionsBd = !!(results.emissionsBreakdown && (
@@ -319,6 +321,20 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasAnnualBudgets) {
     const ab: Card = { id: id('ab'), kind: 'annual-budgets' };
     rows.push(row({ height: 200, cards: [{ card: ab }] }));
+  }
+
+  // 8d. Composite assets (BESS, CCGT / OCGT, co-firing, P2X): the model has plant registry rows.
+  if (hasComposites) {
+    const cp: Card = { id: id('cp'), kind: 'composites' };
+    // Sized to its table (header + one line per composite + the note), not to the dashboard's width-based default.
+    rows.push(row({ height: Math.min(560, 130 + 34 * (model?.RAGNAROK_PLANTS?.length ?? 1)), autoHeight: false, cards: [{ card: cp }] }));
+  }
+
+  // 8e. Where the objective went, line by line (capital, operating, fuel, start-up tiers ...).
+  if (hasCostBreakdown) {
+    const cb: Card = { id: id('cb'), kind: 'cost-breakdown' };
+    const lineCount = (results.costBreakdown ?? []).filter((l) => l.value !== 0).length;
+    rows.push(row({ height: Math.min(560, 90 + 30 * (lineCount + 1)), autoHeight: false, cards: [{ card: cb }] }));
   }
 
   // 9. Capacity expansion (conditional)

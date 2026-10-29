@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _EXPORT_ANN, _MUT, _RO, _needs_confirm, _preview, get_client, mcp
 
 
@@ -84,7 +85,7 @@ async def _apply(resp: dict[str, Any]) -> dict[str, Any]:
 
 @mcp.tool(
     annotations=_MUT,
-    description="Reduce the time axis with PyPSA's native temporal clustering and replace the working model. method: resample (offset like '3h' or '1D', optional drop_leap_day, aggregation_rules), downsample (stride >= 2) or segment (num_segments contiguous TSAM segments via tsam 4.1.1, installed in the backend; solver names the MIP solver tsam uses, default highs). Snapshot weightings keep annual energy and cost correct. This is the VISIBLE way to change the resolution (the run option snapshotWeight > 1 is refused): resample writes the reduced snapshots, the weightings and block-mean series into the workbook; downsample is PyPSA's point sampling (every stride-th snapshot, weight x stride). Applied on confirm.",
+    description="Reduce the number of snapshots (representative days, resampling, downsampling) to speed up a run, with PyPSA's native temporal clustering and replace the working model. method: resample (offset like '3h' or '1D', optional drop_leap_day, aggregation_rules), downsample (stride >= 2) or segment (num_segments contiguous TSAM segments via tsam 4.1.1, installed in the backend; solver names the MIP solver tsam uses, default highs). Snapshot weightings keep annual energy and cost correct. This is the VISIBLE way to change the resolution (the run option snapshotWeight > 1 is refused): resample writes the reduced snapshots, the weightings and block-mean series into the workbook; downsample is PyPSA's point sampling (every stride-th snapshot, weight x stride). Applied on confirm.",
 )
 async def temporal_cluster(
     method: str = "resample",
@@ -105,7 +106,7 @@ async def temporal_cluster(
 
 @mcp.tool(
     annotations=_MUT,
-    description="Keep only a snapshot window (start/end: integer positions, end exclusive, or ISO labels, inclusive) and/or a bus subset (buses) of the working model via n.slice_network. Applied on confirm.",
+    description="Keep only part of the model, e.g. the first week of snapshots or a subset of buses. Snapshot window (start/end: integer positions, end exclusive, or ISO labels, inclusive) and/or a bus subset (buses) of the working model via n.slice_network. Applied on confirm.",
 )
 async def slice_model(start: int | str | None = None, end: int | str | None = None, buses: list[str] | None = None, confirm: bool = False) -> Any:
     args = {"start": start, "end": end, "buses": buses}
@@ -169,3 +170,18 @@ async def set_carrier_growth_limit(carrier: str, max_growth: float | None = None
         }
         done.append(await client.forge_query(True, req))
     return {"status": "applied", "carrier": carrier, "edits": edits, "results": done}
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "describe_optimise_options": "run",
+    "export_lp": "run",
+    "consistency_check": "inspect",
+    "network_analysis": "inspect",
+    "get_statistics": "results",
+    "temporal_cluster": "transforms",
+    "slice_model": "transforms",
+    "merge_models": "transforms",
+    "cluster_network_hac": "transforms",
+    "set_carrier_growth_limit": "policy",
+})

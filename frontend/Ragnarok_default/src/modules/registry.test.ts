@@ -3,7 +3,7 @@
  *
  * The classification is a product decision (2026-08-01): core = Welcome,
  * Build, Model, Market & Policy, Settings, Analytics, History, Plugins;
- * modules = Data, Forge, Physical Risk, Siting, Screening, P2X, Post-analysis, Reporting,
+ * modules = Data, Forge, Physical Risk, Siting, Screening, Composites, Post-analysis, Reporting,
  * Training. These tests pin it so a tab can't silently change sides.
  */
 import { describe, expect, it } from '@jest/globals';
@@ -13,10 +13,11 @@ import {
   defaultEnabledModulesCsv,
   isTabModule,
   parseEnabledModules,
+  reconcileEnabledModules,
   serializeEnabledModules,
 } from './registry';
 
-const MODULE_TABS: WorkspaceTab[] = ['Data', 'Forge', 'PhysicalRisk', 'Siting', 'Screening', 'P2X', 'PostAnalysis', 'Reporting', 'Training'];
+const MODULE_TABS: WorkspaceTab[] = ['Data', 'Forge', 'PhysicalRisk', 'Siting', 'Screening', 'Composites', 'PostAnalysis', 'Reporting', 'Training'];
 const CORE_TABS: WorkspaceTab[] = ['Welcome', 'Build', 'Model', 'Market', 'Settings', 'Analytics', 'History', 'Plugins'];
 
 describe('the core/module split', () => {
@@ -61,5 +62,41 @@ describe('enablement parsing', () => {
 
   it('defaults csv covers every module', () => {
     expect(parseEnabledModules(defaultEnabledModulesCsv()).size).toBe(TAB_MODULES.length);
+  });
+});
+
+describe('reconcileEnabledModules', () => {
+  const all = TAB_MODULES.map((m) => m.id);
+
+  it('switches on a module added after the list was saved, once', () => {
+    const saved = 'Data,Forge';
+    const seen = 'Data,Forge,PhysicalRisk,Siting,PostAnalysis,Training';
+    const first = reconcileEnabledModules(saved, seen);
+    expect(first.enabledModules.split(',')).toEqual(expect.arrayContaining(['Data', 'Forge', 'Composites', 'Screening', 'Reporting']));
+    expect(first.seenModules.split(',').sort()).toEqual([...all].sort());
+  });
+
+  it('keeps a module the user turned off once it has been seen', () => {
+    const r = reconcileEnabledModules('Data', all.join(','));
+    expect(r.enabledModules).toBe('Data');
+    expect(reconcileEnabledModules(r.enabledModules, r.seenModules).enabledModules).toBe('Data');
+  });
+
+  it('a legacy list (no seen record) keeps the old deliberate offs and turns the newer modules on', () => {
+    const r = reconcileEnabledModules('Data,Forge,Siting', undefined);
+    const on = r.enabledModules.split(',');
+    expect(on).toEqual(expect.arrayContaining(['Data', 'Forge', 'Siting', 'Composites', 'Screening', 'Reporting']));
+    expect(on).not.toContain('PhysicalRisk');
+    expect(on).not.toContain('Training');
+  });
+
+  it('the renamed P2X entry becomes Composites', () => {
+    const r = reconcileEnabledModules('Data,P2X', 'Data,P2X');
+    expect(r.enabledModules.split(',')).toContain('Composites');
+    expect(r.enabledModules).not.toContain('P2X');
+  });
+
+  it('the shipped default list covers every registered module', () => {
+    expect(defaultEnabledModulesCsv().split(',').sort()).toEqual([...all].sort());
   });
 });

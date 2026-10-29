@@ -30,9 +30,6 @@ import { BuildDetailPane } from './BuildDetailPane';
 import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNetworkMap';
 import { BuildAttributeForm } from './BuildAttributeForm';
 import { ConversionPicker } from './ConversionPicker';
-import { PlantPicker } from './PlantPicker';
-import { PlantList } from './PlantList';
-import { plantCards, type PlantCard, type PlantChange } from 'lib/build/plants';
 import { SnapshotBuilder } from './SnapshotBuilder';
 import { TimeUnitsPanel } from './TimeUnitsPanel';
 import type { WorkbookFragment } from 'lib/api/databases';
@@ -77,10 +74,12 @@ export interface BuildViewProps {
   /** Merge a conversion-technology fragment (Link + carrier bus + carriers +
    *  fuel supply) into the working model. */
   onApplyConversion?: (fragment: WorkbookFragment, label: string) => void;
-  /** Apply a plant change set (remove / release / merge) to the working model as ONE edit. */
-  onApplyPlantChange?: (change: PlantChange, label: string) => void | Promise<void>;
-  /** Settings -> Discount rate, passed to the plant picker. */
+  /** Settings -> Discount rate, passed to the conversion picker. */
   discountRate?: number;
+  /** Switch to the Composites tab (optionally opening one composite for editing). */
+  onOpenComposites?: (plantId?: string) => void;
+  /** Whether the Composites module is enabled (Settings -> Modules); the pointer is hidden when it is not. */
+  hasComposites?: boolean;
   /** Push the working model to the session (the time-units preview is computed by the server from the session). */
   onSessionSync?: () => Promise<void>;
 }
@@ -207,7 +206,6 @@ export function BuildView(props: BuildViewProps) {
   // A new object on each map-select flashes + scrolls the matching table row.
   const [jumpTo, setJumpTo] = useState<{ sheet: string; rowIndex: number } | null>(null);
   const [linkMode, setLinkMode] = useState<LinkMode | null>(null);
-  const [editingPlant, setEditingPlant] = useState<PlantCard | null>(null);
   const step: BuildStep = BUILD_STEPS[stepIndex];
   const geo = isGeoSheet(step.primarySheet);
   // Ramp limits / minimum times: stated in time units, converted per snapshot by the run (the Time units drawer).
@@ -379,19 +377,11 @@ export function BuildView(props: BuildViewProps) {
   // that support time-series) a panel to pick / CSV-import temporal profiles.
   const rightColumn = (
     <div className="build-top-right">
-      {step.primarySheet === 'generators' && props.onApplyPlantChange && (
-        <>
-          <PlantPicker
-            model={props.model}
-            busNames={busNames}
-            carrierNames={carrierNames}
-            onApply={props.onApplyPlantChange}
-            editing={editingPlant}
-            discountRate={props.discountRate}
-            onDoneEditing={() => setEditingPlant(null)}
-          />
-          <PlantList model={props.model} onEdit={setEditingPlant} onApply={props.onApplyPlantChange} />
-        </>
+      {step.primarySheet === 'generators' && props.hasComposites && props.onOpenComposites && (
+        <p className="build-composites-pointer" data-testid="composites-pointer">
+          Composite assets (BESS, CCGT, co-firing, P2X){' '}
+          <button type="button" className="cmp-link" onClick={() => props.onOpenComposites?.()}>Open Composites</button>
+        </p>
       )}
       {attributeForm}
       {step.primarySheet === 'links' && props.onApplyConversion && (
@@ -469,10 +459,7 @@ export function BuildView(props: BuildViewProps) {
       onStartLink={geo ? startLink : undefined}
       onPickBus={geo ? pickBus : undefined}
       onCancelLink={() => setLinkMode(null)}
-      onSelectPlant={(id) => {
-        const card = plantCards(props.model).find((c) => c.plantId === id);
-        if (card && props.onApplyPlantChange) { goStep(BUILD_STEPS.findIndex((x) => x.id === 'generators')); setEditingPlant(card.editable ? card : null); }
-      }}
+      onSelectPlant={props.hasComposites && props.onOpenComposites ? (id) => props.onOpenComposites?.(id) : undefined}
     />
   );
 

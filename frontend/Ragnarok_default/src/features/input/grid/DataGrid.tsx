@@ -127,6 +127,10 @@ export interface DataGridProps {
    *  width overrides are persisted in localStorage. Omit to use a single
    *  shared bucket — but in practice every call site has a sheet context. */
   storageKey?: string;
+  /** A click on a cell of `col` reports the row's original index (a link-like cell, e.g. the composite that owns a row). */
+  onLinkCellClick?: { col: string; handler: (rowIndex: number) => void };
+  /** Original indices of rows a composite owns: tinted so they read as a group (a direct edit offers Edit composite / Detach). */
+  ownedRows?: ReadonlySet<number>;
 }
 
 const COL_WIDTH_STORAGE_PREFIX = 'pypsa.gridColumnWidths.';
@@ -179,6 +183,7 @@ export function DataGrid({
   rowIssues,
   cellIssues,
   highlightRow,
+  ownedRows,
   onDeleteColumn,
   onRenameColumn,
   protectedCols,
@@ -196,6 +201,7 @@ export function DataGrid({
   onClearTable,
   onAnalyse,
   storageKey,
+  onLinkCellClick,
 }: DataGridProps) {
   const gridRef = useRef<any>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -364,6 +370,12 @@ export function DataGrid({
     };
   }, [cols, gridRows, display, readOnly, readOnlyCols, displayToOrig, cellIssues]);
 
+  const onCellClicked = useCallback(([c, r]: Item) => {
+    if (!onLinkCellClick || c >= cols.length || cols[c] !== onLinkCellClick.col) return;
+    const orig = displayToOrig[r];
+    if (orig != null) onLinkCellClick.handler(orig);
+  }, [onLinkCellClick, cols, displayToOrig]);
+
   const onCellEdited = useCallback(([c, r]: Item, newVal: EditableGridCell) => {
     if (readOnly || !onUpdate) return;
     if (c >= cols.length) return; // trailing "+" column
@@ -520,8 +532,9 @@ export function DataGrid({
     const sev = rowIssues?.get(orig);
     if (sev === 'error') return { bgCell: '#fbe7e7', accentColor: '#d03b3b' };
     if (sev === 'warning') return { bgCell: '#fdf1d4', accentColor: '#fab219' };
+    if (ownedRows?.has(orig)) return { bgCell: '#eef2f8' };
     return undefined;
-  }, [displayToOrig, rowIssues]);
+  }, [displayToOrig, rowIssues, ownedRows]);
 
   // ── Hover a cell with a validation issue → message tooltip ────────────────
   const onItemHovered = useCallback((args: GridMouseEventArgs) => {
@@ -593,6 +606,7 @@ export function DataGrid({
           rows={gridRows.length}
           getCellContent={getCellContent}
           onCellEdited={readOnly ? undefined : onCellEdited}
+          onCellClicked={onLinkCellClick ? onCellClicked : undefined}
           onPaste={readOnly ? undefined : onPaste}
           onColumnResize={onColumnResize}
           getCellsForSelection={true}

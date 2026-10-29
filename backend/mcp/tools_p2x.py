@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp
 
 _SPEC_HELP = (
@@ -77,7 +78,7 @@ async def preview_p2x_chain(spec: dict[str, Any] | None = None) -> Any:
 @mcp.tool(
     annotations=_RO,
     description=(
-        "P2X results of a stored run: LCOH per kg H2, LCOA per t NH3, LCOM per t MeOH, e-fuel cost per MWh and per litre, a cost waterfall per product, "
+        "P2X results of a stored run (hydrogen production cost 수소 생산 단가): LCOH per kg H2, LCOA per t NH3, LCOM per t MeOH, e-fuel cost per MWh and per litre, a cost waterfall per product, "
         "electrolyser capacity factor and full-load hours, H2 store SoC, the RFNBO hourly and monthly compliance table (share of compliant hours and the "
         "unmatched electricity), additionality and geographic checks, and the Art. 4 grid-alternative checks. period selects the investment period of a "
         "pathway run; electricity_cost is 'nodal' (nodal price x consumption) or 'ppa' (designated generators' cost). The run must contain a P2X chain."
@@ -100,7 +101,7 @@ async def get_p2x_results(
 @mcp.tool(
     annotations=_MUT,
     description=(
-        "Build a P2X chain into the working model through the fragment merge (buses, carriers, Links, Stores, offtake Loads and the RAGNAROK_P2X "
+        "Build a hydrogen (electrolyser) / ammonia / methanol / e-fuel power-to-X chain into the working model through the fragment merge (buses, carriers, Links, Stores, offtake Loads and the RAGNAROK_P2X "
         "registry row). Without confirm=true it returns the preview of what would be merged. After applying, solve as usual; add "
         "options={'rfnboConfig': {'enabled': true, 'temporal': 'hourly'}} to submit_solve for RFNBO matching. " + _SPEC_HELP
     ),
@@ -109,3 +110,12 @@ async def build_p2x_chain(spec: dict[str, Any] | None = None, confirm: bool = Fa
     if _needs_confirm(cheap=False) and not confirm:
         return _preview("Merge a P2X chain into the working model.", _trim(await _chain(spec, apply=False)))
     return _trim(await _chain(spec, apply=True))
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "list_p2x_technologies": "composites",
+    "preview_p2x_chain": "composites",
+    "get_p2x_results": "composites",
+    "build_p2x_chain": "composites",
+})

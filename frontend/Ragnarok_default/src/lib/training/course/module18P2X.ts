@@ -2,8 +2,8 @@
  * Module 18 — Power-to-X (9 steps).
  *
  * Module 5 drew a fuel bus and a conversion Link by hand. This module adds a whole
- * power-to-hydrogen chain the way Ragnarok builds one — one plant from the Build →
- * Generators plant picker — reads what it costs per kilogram, and then applies the
+ * power-to-hydrogen chain the way Ragnarok builds one — one composite from the Composites
+ * tab — reads what it costs per kilogram, and then applies the
  * rule that decides whether that hydrogen counts as renewable: RFNBO matching under
  * Commission Delegated Regulation (EU) 2023/1184. The question it answers is the one a
  * developer asks: what does hourly matching do to the electrolyser, the storage and
@@ -25,7 +25,7 @@
  *
  * Technology numbers come from `backend/app/p2x/technologies.json` (PyPSA
  * technology-data v0.15.0 and the Danish Energy Agency catalogue, EUR2025, technology
- * year 2030), each with its source and a `verified` flag the P2X tab shows.
+ * year 2030), each with its source and a `verified` flag the Composites tab shows.
  */
 import { TutorialStep } from '../types';
 
@@ -44,7 +44,7 @@ export const MODULE_18_P2X: TutorialStep[] = [
       note:
         'Module 18 starts from its own small grid rather than module 17\'s: one bus over one March week of 2030 '
         + 'with 120 MW of solar, 100 MW of wind and 400 MW of gas. The prebuilt option has no P2X chain; the '
-        + 'finished one has the P2X plant this module adds. The RFNBO matching setting is a P2X tab setting, not '
+        + 'finished one has the P2X plant this module adds. The RFNBO matching setting is a Composites → Rules setting, not '
         + 'part of the workbook, so neither checkpoint carries it.',
     },
     concept: [
@@ -113,8 +113,8 @@ export const MODULE_18_P2X: TutorialStep[] = [
     id: 'm18-technology-data',
     section: SECTION,
     title: 'Where the electrolyser\'s numbers come from',
-    tab: 'P2X',
-    where: 'P2X → Chain designer → Technology parameters',
+    tab: 'Composites',
+    where: 'Composites → Add a composite → Technology data used',
     concept: [
       'A P2X chain is a handful of conversions, and each conversion is a few numbers: how much electricity per '
       + 'kilogram, what it costs to build, how long it lasts, how often it is available. Ragnarok keeps them in '
@@ -137,17 +137,17 @@ export const MODULE_18_P2X: TutorialStep[] = [
       + 'only enforced on a fixed-size electrolyser — this module lets the solver size it, so it is not.',
     ],
     explain: [
-      'Open the P2X tab (in the activity bar). The Chain designer is the first section. Its right-hand column, '
-      + 'Technology parameters, lists the technologies the current form uses, one table each. Hover a row: the '
-      + 'tooltip shows the source document, the locator and the year. The chip at the end is the verified flag.',
+      'Open the Composites tab (in the activity bar, right after Model) and its Add a composite section. Choose '
+      + 'Composite type P2X chain. Below the form, Technology data used lists the technologies the chain reads, one '
+      + 'table each, with the source document, the locator, the year and the verified flag in every row.',
 
       'Find the Alkaline electrolyser (AEC) table and check: specific energy 53.565843, capex 691.534046, fom 4, '
       + 'lifetime 25, stack capex 145.159019, stack lifetime hours 92500, water use 185.169748, availability '
       + '0.939863 (derived) and min load 15 (literature-recalled). Then the Compressed H2 tank: capex 60.0469, '
       + 'fom 1.1133, lifetime 30.',
 
-      'You will not type any of these. The plant picker in the next step reads the same file. Editing a value '
-      + 'here overrides it for a chain built from the Chain designer; it does not change the file.',
+      'You will not type any of these. The same form reads the same file. A value is overridden under Advanced → '
+      + 'Parameter overrides; that does not change the file.',
 
       'Note the basis line above the tables: EUR, 2025 prices. Ragnarok applies no exchange rate, and labels '
       + 'money with the Settings → Project defaults → Currency symbol ($ unless you changed it). The P2X results '
@@ -155,16 +155,16 @@ export const MODULE_18_P2X: TutorialStep[] = [
     ],
     spotlights: [
       {
-        selector: '.activity-bar-btn[aria-label="P2X"]',
-        title: 'The P2X tab',
-        note: 'Chain designer, RFNBO rules and Results. Everything it builds is ordinary PyPSA components merged '
+        selector: '.activity-bar-btn[aria-label="Composites"]',
+        title: 'The Composites tab',
+        note: 'The composites in the model and their connections, Add a composite, the rules and the results. Everything it builds is ordinary PyPSA components merged '
           + 'into the working model; there is no separate engine.',
       },
       {
-        selector: '.p2x-params',
-        title: 'Technology parameters, with sources',
-        tab: 'P2X',
-        note: 'Hover any row for its source document, sheet or row, and year. The chip is the verified flag: file, '
+        selector: '[data-testid="technology-data"]',
+        title: 'Technology data, with sources',
+        tab: 'Composites',
+        note: 'Each row names its source document, sheet or row, and year. The chip is the verified flag: file, '
           + 'derived or literature-recalled. Check the flag before you quote a number from it.',
       },
     ],
@@ -186,11 +186,11 @@ export const MODULE_18_P2X: TutorialStep[] = [
   {
     id: 'm18-add-the-chain',
     section: SECTION,
-    title: 'Add the P2X chain from the plant picker',
-    tab: 'Build',
-    where: 'Build → Generators step → Add a plant',
+    title: 'Add the P2X chain as a composite',
+    tab: 'Composites',
+    where: 'Composites → Add a composite',
     concept: [
-      'Ragnarok builds a P2X chain from ordinary PyPSA components, and the plant picker adds one as ONE plant. '
+      'Ragnarok builds a P2X chain from ordinary PyPSA components, and the Composites tab adds one as ONE composite. '
       + 'For hydrogen it is four things. A new BUS for hydrogen, carrier H2, where energy is counted in MW of '
       + 'hydrogen on the LHV basis. The ELECTROLYSER, a Link from the grid bus to the hydrogen bus with '
       + 'efficiency 0.6222: one MW of electricity in, 0.6222 MW of hydrogen out. A STORE on the hydrogen bus, the '
@@ -206,40 +206,39 @@ export const MODULE_18_P2X: TutorialStep[] = [
       + '151.2 t over the week. The customer does not care when the hydrogen was made; the tank decouples the two.',
 
       'The chain also needs to know which renewable generators the electrolyser buys from — its PPA — before any '
-      + 'matching rule can be applied. The picker takes them as a chain override; the Chain designer in the P2X '
-      + 'tab has the same list as checkboxes.',
+      + 'matching rule can be applied. The Connections section of the form has them as a list of the model\'s '
+      + 'generators to tick. It also asks which bus the electrolyser draws from and which bus the hydrogen goes to.',
     ],
     explain: [
-      'Build → Generators step. On the right, Add a plant: Plant type P2X chain. Leave Plant name blank (it becomes '
-      + 'p2x) and Connect at bus blank (the first electricity bus, grid). Tick Let the solver size it. Product H2, '
-      + 'H2 storage tank, Product offtake 30.',
+      'Composites → Add a composite: Composite type P2X chain. Under Connections leave Electricity bus blank (the first '
+      + 'electricity bus, grid) and H2 bus blank (a new one), and tick solar and wind under Renewable supply matched '
+      + 'to. Leave Plant name blank (it becomes p2x). Tick Let the solver size it. Product H2, H2 storage tank, '
+      + 'Product offtake 30.',
 
-      'Open Advanced. Discount rate already reads 0.05, from Settings. In Chain spec overrides type '
-      + '{"designatedGenerators": ["solar", "wind"]}.',
+      'The schematic under the form draws grid to the electrolyser to the new hydrogen bus, with the offtake and the '
+      + 'store on it. Advanced holds the discount rate, which already reads 0.05, from Settings.',
 
       'The preview line reads Creates: 1 buses, 3 carriers, 1 links, 1 stores, 1 loads. The warning under it says '
       + 'fom_cost is written per modelled horizon (fixed O&M a year x 0.0191781 years for 168 hours): re-apply the plant '
       + 'if you change the snapshots. Press Add P2X chain.',
 
-      'The Plants list below now has p2x. Expand it: p2x_bus_h2, the carriers, p2x_electrolyser (links), '
+      'The In this model table below now has p2x. Expand it: p2x_bus_h2, the carriers, p2x_electrolyser (links), '
       + 'p2x_h2_store (stores) and p2x_load_H2 (loads). Open the Links step and find p2x_electrolyser: bus0 grid, '
       + 'bus1 p2x_bus_h2, efficiency 0.62222488, marginal_cost 1.704183, overnight_cost 691534.046, p_max_pu '
       + '0.939863, p_nom_extendable true. Every number is the data file\'s.',
     ],
     spotlights: [
       {
-        selector: '[data-testid="plant-picker"]',
-        buildStep: 'generators',
-        title: 'One plant type, a few fields',
-        tab: 'Build',
+        selector: '[data-testid="composite-form"]',
+        title: 'Connections first, then a few fields',
+        tab: 'Composites',
         note: 'P2X chain with a bus, a capacity choice, the product, the storage and the offtake. Everything else is '
-          + 'derived from the technology file; Advanced holds the discount rate and the chain overrides.',
+          + 'derived from the technology file; Advanced holds the discount rate and the escape-hatch overrides.',
       },
       {
-        selector: '[data-testid="plant-list"]',
-        buildStep: 'generators',
-        title: 'The chain is one plant',
-        tab: 'Build',
+        selector: '[data-testid="composite-table"]',
+        title: 'The chain is one composite',
+        tab: 'Composites',
         note: 'Edit re-derives every component from the stored spec; Delete removes them all and keeps any bus or '
           + 'carrier another component still uses. Step 8 uses Edit to switch the product.',
       },
@@ -254,14 +253,14 @@ export const MODULE_18_P2X: TutorialStep[] = [
     ],
     entries: [
       {
-        field: 'Build → Generators → Add a plant → Plant type, Let the solver size it',
+        field: 'Composites → Add a composite → Composite type, Let the solver size it',
         label: 'what to add, and who sizes it',
         value: 'P2X chain; ticked',
         why: 'An extendable electrolyser lets the model choose the MW, so the capacity factor and the storage are '
           + 'answers the matching rule can change. A fixed size would hide most of what step 6 shows.',
       },
       {
-        field: 'Build → Generators → Add a plant → Product, H2 storage, Product offtake',
+        field: 'Composites → Add a composite → Product, H2 storage, Product offtake',
         label: 'the product and its customer',
         value: 'H2, tank, 30',
         unit: 'MW (LHV)',
@@ -269,15 +268,15 @@ export const MODULE_18_P2X: TutorialStep[] = [
           + 'storing hydrogen is cheaper than more electrolyser, and must end the week where it started.',
       },
       {
-        field: 'Build → Generators → Add a plant → Advanced → Chain spec overrides',
+        field: 'Composites → Add a composite → Connections → Renewable supply matched to',
         label: 'the designated renewable generators',
-        value: '{"designatedGenerators": ["solar", "wind"]}',
+        value: 'solar and wind ticked',
         why: 'The generators the electrolyser is matched to under the RFNBO rules. Without them a solve with '
           + 'matching switched on is refused before it starts, with a message saying why.',
       },
     ],
     verify: [
-      'The Plants list shows p2x with 7 rows, solver-sized',
+      'The In this model table shows p2x with 7 rows, solver-sized',
       'p2x_electrolyser is a Link from grid to p2x_bus_h2 with efficiency 0.62222488 and p_max_pu 0.939863',
       'p2x_load_H2 is 30 MW on p2x_bus_h2',
       'You can say why the electrolyser is a Link and the ammonia synthesis will be a Process',
@@ -294,8 +293,8 @@ export const MODULE_18_P2X: TutorialStep[] = [
     id: 'm18-solve-without-a-rule',
     section: SECTION,
     title: 'Solve with no rule, and read the levelised cost',
-    tab: 'P2X',
-    where: 'Run dialog, then P2X → Results',
+    tab: 'Composites',
+    where: 'Run dialog, then Composites → Results',
     concept: [
       'With no matching rule the electrolyser buys whatever is cheapest. Here every hour costs 70, so the cheapest '
       + 'way to make 30 MW of hydrogen is the SMALLEST electrolyser that can: run it at its availability limit in '
@@ -315,7 +314,7 @@ export const MODULE_18_P2X: TutorialStep[] = [
     explain: [
       'Run. Total cost 1,819,359: the chain adds 656,287 to the week.',
 
-      'Open P2X → Results and pick the run you just made in Stored run (Electricity cost: Nodal price x '
+      'Open Composites → Results and pick the run you just made in Stored run (Electricity cost: Nodal price x '
       + 'consumption). The KPI cards read LCOH 4.34 per kg (151.2 t H2 · electricity nodal) and Electrolyser '
       + 'capacity factor 94% (8,233 full-load h/yr · 51.3 MW). The H2 store state of charge is flat at zero: no tank '
       + 'was built.',
@@ -330,16 +329,16 @@ export const MODULE_18_P2X: TutorialStep[] = [
     ],
     spotlights: [
       {
-        selector: 'nav[aria-label="P2X sections"]',
+        selector: 'nav[aria-label="Composites sections"]',
         title: 'Open Results',
-        tab: 'P2X',
+        tab: 'Composites',
         note: 'Results reads a stored run: pick it in Stored run. Every number on the panel is computed by the '
           + 'backend from that run\'s model and series; the panel only draws it.',
       },
       {
         selector: '.p2x-kpis',
         title: 'LCOH and capacity factor',
-        tab: 'P2X',
+        tab: 'Composites',
         note: 'LCOH 4.34 per kg; capacity factor 94%, which is the availability: the electrolyser runs flat out '
           + 'every hour because nothing makes one hour cheaper than another.',
       },
@@ -351,12 +350,12 @@ export const MODULE_18_P2X: TutorialStep[] = [
     },
     verify: [
       'Total cost reads 1,819,359',
-      'P2X → Results shows LCOH 4.34 and an electrolyser capacity factor of 94% at 51.3 MW',
+      'Composites → Results shows LCOH 4.34 and an electrolyser capacity factor of 94% at 51.3 MW',
       'The waterfall\'s electricity step is 3.75, and you can derive it from 70 and 53.57',
       'Hourly compliant hours reads 64.9% with matching off',
     ],
     pitfalls: [
-      'Reading P2X → Results with no run selected, or an older run. It reads the stored run picked in Stored run, '
+      'Reading Composites → Results with no run selected, or an older run. It reads the stored run picked in Stored run, '
       + 'not the model on screen.',
       'Taking 94% as a design choice. Nobody chose it: it is what a flat price and a free choice of size produce. '
       + 'Change the price shape and it changes.',
@@ -367,8 +366,8 @@ export const MODULE_18_P2X: TutorialStep[] = [
     id: 'm18-monthly-matching',
     section: SECTION,
     title: 'Match the volume: monthly matching',
-    tab: 'P2X',
-    where: 'P2X → RFNBO, then Run dialog',
+    tab: 'Composites',
+    where: 'Composites → Rules, then Run dialog',
     concept: [
       'Hydrogen counts as a renewable fuel of non-biological origin (RFNBO) in the EU only if its electricity meets '
       + 'the Delegated Regulation\'s rules. Its Article 6 is TEMPORAL correlation: in each matching period the '
@@ -387,7 +386,7 @@ export const MODULE_18_P2X: TutorialStep[] = [
       + 'that does not bind does not change the answer, however good it sounds.',
     ],
     explain: [
-      'P2X → RFNBO. Tick RFNBO matching on, set Temporal correlation to Monthly (calendar month), leave the rest, '
+      'Composites → Rules. Tick RFNBO matching on, set Temporal correlation to Monthly (calendar month), leave the rest, '
       + 'and press Save settings. The settings are stored for this session and ride with the next solve.',
 
       'A warning appears: the model starts in 2030, so monthly matching is no longer accepted from 1 January 2030. '
@@ -397,27 +396,27 @@ export const MODULE_18_P2X: TutorialStep[] = [
       'The right-hand card, Checks before the solve, lists p2x_electrolyser and the designated solar and wind, and '
       + 'passes both on additionality and geography. Step 7 says what those passes do and do not mean.',
 
-      'Run. Total cost 1,819,359 — identical. P2X → Results for the new run: LCOH 4.34, 51.3 MW, 94%.',
+      'Run. Total cost 1,819,359 — identical. Composites → Results for the new run: LCOH 4.34, 51.3 MW, 94%.',
     ],
     spotlights: [
       {
-        selector: 'nav[aria-label="P2X sections"]',
+        selector: 'nav[aria-label="Composites sections"]',
         title: 'Open RFNBO',
-        tab: 'P2X',
+        tab: 'Composites',
         note: 'Matching rules on the left, the checks before the solve on the right. Save settings stores them for '
           + 'the session; a run that sets its own rfnboConfig through the API ignores them.',
       },
     ],
     entries: [
       {
-        field: 'P2X → RFNBO → RFNBO matching on, Temporal correlation',
+        field: 'Composites → Rules → RFNBO matching on, Temporal correlation',
         label: 'switch matching on, monthly',
         value: 'ticked; Monthly (calendar month)',
         why: 'Adds one constraint for the whole window: electrolyser MWh at most designated MWh. On a one-week model '
           + 'that is a volume match, the loosest form of the rule.',
       },
       {
-        field: 'P2X → RFNBO → Save settings',
+        field: 'Composites → Rules → Save settings',
         label: 'store the settings for the next solve',
         value: 'press it',
         why: 'The settings are a run option kept outside the workbook. Without saving, the next solve runs with '
@@ -445,8 +444,8 @@ export const MODULE_18_P2X: TutorialStep[] = [
     id: 'm18-hourly-matching',
     section: SECTION,
     title: 'Hourly matching: more electrolyser, a tank, a higher LCOH',
-    tab: 'P2X',
-    where: 'P2X → RFNBO, Run dialog, then P2X → Results',
+    tab: 'Composites',
+    where: 'Composites → Rules, Run dialog, then Composites → Results',
     concept: [
       'Hourly matching applies the same inequality in every hour. The electrolyser may now run only as hard as '
       + 'solar and wind are producing in that hour. At night with little wind it must slow down or stop — but the '
@@ -467,9 +466,9 @@ export const MODULE_18_P2X: TutorialStep[] = [
       + 'are cheaper. Here the flat price isolates the hardware effect on purpose. Total cost rises 79,427 for the week.',
     ],
     explain: [
-      'P2X → RFNBO: Temporal correlation Hourly (every snapshot), Save settings. Run.',
+      'Composites → Rules: Temporal correlation Hourly (every snapshot), Save settings. Run.',
 
-      'Total cost 1,898,786. P2X → Results for the new run: LCOH 4.87; capacity factor 72.6% at 66.4 MW (6,358 '
+      'Total cost 1,898,786. Composites → Results for the new run: LCOH 4.87; capacity factor 72.6% at 66.4 MW (6,358 '
       + 'full-load h/yr); Hourly compliant hours 100%, 0 MWh unmatched.',
 
       'Look at the two charts. Electrolyser dispatch against the designated RES: the electrolyser line never rises '
@@ -484,14 +483,14 @@ export const MODULE_18_P2X: TutorialStep[] = [
       {
         selector: '.p2x-kpis',
         title: 'LCOH 4.87, capacity factor 72.6%',
-        tab: 'P2X',
+        tab: 'Composites',
         note: 'The same hydrogen, the same electricity, more electrolyser and a tank. Utilisation falls because the '
           + 'MW grew, not because the electricity fell: 8,100 MWh either way.',
       },
     ],
     entries: [
       {
-        field: 'P2X → RFNBO → Temporal correlation',
+        field: 'Composites → Rules → Temporal correlation',
         label: 'match every hour',
         value: 'Hourly (every snapshot); Save settings',
         why: 'One constraint per snapshot. The electrolyser follows the designated output; the tank carries the '
@@ -505,7 +504,7 @@ export const MODULE_18_P2X: TutorialStep[] = [
     },
     verify: [
       'Total cost reads 1,898,786',
-      'P2X → Results shows LCOH 4.87, capacity factor 72.6% at 66.4 MW, and 100% hourly compliance',
+      'Composites → Results shows LCOH 4.87, capacity factor 72.6% at 66.4 MW, and 100% hourly compliance',
       'The H2 store peaks at 651.5 MWh',
       'You can say which waterfall steps grew and why the electricity step did not',
     ],
@@ -522,7 +521,7 @@ export const MODULE_18_P2X: TutorialStep[] = [
     section: SECTION,
     title: 'What matching changes, and what it does not',
     tab: 'Analytics',
-    where: 'Analytics → Result (emissions), then P2X → Results',
+    where: 'Analytics → Result (emissions), then Composites → Results',
     concept: [
       'Look at the system emissions across the three runs: 9,886.1 tCO2 with no matching, 9,886.1 with monthly, '
       + '9,886.1 with hourly. Identical. The chain added 3,240 t to the week (from 6,646.1), which is the 8,100 MWh '
@@ -548,7 +547,7 @@ export const MODULE_18_P2X: TutorialStep[] = [
       + 'breakdown card: Total emissions 9.9 ktCO2e every time, and the gas row of its per-generator table 9,886.1 t, '
       + 'against 6,646.1 with no chain.',
 
-      'P2X → Results, the Additionality, geography and grid alternatives card: solar and wind pass Additionality '
+      'Composites → Results, the Additionality, geography and grid alternatives card: solar and wind pass Additionality '
       + '(Art. 5(a)) and Geographic correlation (Art. 7(1)(a)); Art. 4(1) renewable share 30.9%, fail. Read the Why '
       + 'column of the additionality rows: it names the years it compared.',
 
@@ -582,8 +581,8 @@ export const MODULE_18_P2X: TutorialStep[] = [
     id: 'm18-ammonia',
     section: SECTION,
     title: 'Ammonia: two Processes, and the storage moves downstream',
-    tab: 'Build',
-    where: 'Build → Generators → Plants → p2x → Edit, then Build → Processes',
+    tab: 'Composites',
+    where: 'Composites → In this model → p2x → Edit, then Build → Processes',
     concept: [
       'Hydrogen is hard to store and ship; ammonia is easier. Switching the product turns the chain into an ammonia '
       + 'plant. The electrolyser and hydrogen bus stay; three things are added. An AIR SEPARATION UNIT makes '
@@ -607,16 +606,16 @@ export const MODULE_18_P2X: TutorialStep[] = [
       + 'matching needs more buffer than this model builds.',
     ],
     explain: [
-      'Build → Generators. In the Plants list, Edit on p2x. The form opens with the stored spec; change Product to '
+      'Composites → In this model: Edit on p2x. The form opens with the stored spec; change Product to '
       + 'NH3 and press Save changes. The offtake (30 MW) now applies to ammonia.',
 
       'Build → Processes: p2x_asu and p2x_synth_NH3, with the rates above. Build → Stores: p2x_h2_store and '
       + 'p2x_store_NH3. Build → Loads: p2x_load_NH3, 30 MW.',
 
-      'RFNBO matching is still Hourly from step 6. Run: Total cost 2,206,577. P2X → Results: LCOA 1,070 per t NH3 '
+      'RFNBO matching is still Hourly from step 6. Run: Total cost 2,206,577. Composites → Results: LCOA 1,070 per t NH3 '
       + '(974.9 t produced); electrolyser capacity factor 62% at 89.4 MW.',
 
-      'P2X → RFNBO: untick RFNBO matching on, Save settings, run: 2,128,063; LCOA 990 per t; electrolyser 58.9 MW at '
+      'Composites → Rules: untick RFNBO matching on, Save settings, run: 2,128,063; LCOA 990 per t; electrolyser 58.9 MW at '
       + '94%; no tank of either kind.',
 
       'Put the model back to the checkpoint: Edit p2x, Product H2, Save changes. The chain is re-derived exactly as '
@@ -625,9 +624,8 @@ export const MODULE_18_P2X: TutorialStep[] = [
     spotlights: [
       {
         selector: '[data-plant="p2x"]',
-        buildStep: 'generators',
-        title: 'Edit the plant, not its rows',
-        tab: 'Build',
+        title: 'Edit the composite, not its rows',
+        tab: 'Composites',
         note: 'Edit re-derives every component from the stored spec with your change laid over it, and removes what '
           + 'no longer belongs. Editing the rows by hand would leave the registry describing a different chain.',
       },
@@ -642,14 +640,14 @@ export const MODULE_18_P2X: TutorialStep[] = [
     ],
     entries: [
       {
-        field: 'Build → Generators → Plants → p2x → Edit → Product',
+        field: 'Composites → In this model → p2x → Edit → Product',
         label: 'the product the chain makes',
         value: 'NH3, then back to H2',
         why: 'Re-derives the chain with an air separation unit, Haber-Bosch synthesis and an ammonia tank. Switching '
           + 'back restores the module\'s checkpoint exactly.',
       },
       {
-        field: 'P2X → RFNBO → RFNBO matching on',
+        field: 'Composites → Rules → RFNBO matching on',
         label: 'the comparison run',
         value: 'unticked; Save settings',
         why: 'The second ammonia run is without matching, so the LCOA can be compared like for like. It also leaves '
@@ -685,7 +683,7 @@ export const MODULE_18_P2X: TutorialStep[] = [
       'Four things are now yours.',
 
       'A P2X chain is ordinary components: a bus per energy carrier, a Link for the electrolyser, Processes for the '
-      + 'multi-input syntheses, Stores for the tanks and Loads for the customers. The plant picker writes them from a '
+      + 'multi-input syntheses, Stores for the tanks and Loads for the customers. The Composites tab writes them from a '
       + 'data file whose every number has a source and a verified flag.',
 
       'The levelised cost is a decomposition of the model\'s own costs, and on a grid like this one electricity '

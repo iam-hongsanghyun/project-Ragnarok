@@ -8,6 +8,7 @@ from backend.app import module_hooks as mh
 
 from .constraint_dsl import apply_constraint_specs, apply_dsl_constraints
 from .custom_constraints import apply_custom_constraints
+from .native_routing import dsl_candidates, routed_keys, route_native, spec_candidates, structured_candidates
 
 MODULE = "constraints"
 
@@ -20,17 +21,48 @@ def _prepare(ctx: mh.RunContext) -> Callable[[Any, Any], None]:
     custom_dsl_text: str = str(ctx.scenario.get("customDsl") or "")
     emissions_factors = ctx.emissions_factors
     notes = ctx.notes
+    _route_native(ctx)
 
     def contribute(n: Any, snapshots: Any) -> None:
         # `snapshots` is the window being optimised (a rolling-horizon window, or the whole run): budgets and
-        # weights are scoped to it.
-        apply_custom_constraints(n, custom_constraints, emissions_factors, notes, snapshots)
+        # weights are scoped to it. Constraints the build step wrote as native GlobalConstraint rows are skipped.
+        apply_custom_constraints(
+            n, custom_constraints, emissions_factors, notes, snapshots, skip=routed_keys(n, "cc")
+        )
         if constraint_specs:
-            apply_constraint_specs(n, constraint_specs, emissions_factors, notes, snapshots)
+            apply_constraint_specs(
+                n, constraint_specs, emissions_factors, notes, snapshots, skip=routed_keys(n, "spec")
+            )
         elif custom_dsl_text:
-            apply_dsl_constraints(n, custom_dsl_text, emissions_factors, notes, snapshots)
+            apply_dsl_constraints(
+                n, custom_dsl_text, emissions_factors, notes, snapshots, skip=routed_keys(n, "dsl")
+            )
 
     return contribute
+
+
+def _route_native(ctx: mh.RunContext) -> None:
+    """Write the constraints PyPSA's GlobalConstraint expresses exactly as native rows (run from ``_prepare``,
+    on the built network and before the solve, so the rows are part of the model PyPSA builds).
+
+    Same precedence as :func:`_prepare`: ``constraintSpecs`` over the DSL text. Rolling, stochastic and pathway
+    runs keep the linopy path (see :mod:`.native_routing`).
+    """
+    scenario = ctx.scenario or {}
+    candidates = structured_candidates(scenario.get("constraints") or [])
+    if scenario.get("constraintSpecs"):
+        candidates += spec_candidates(scenario["constraintSpecs"])
+    elif scenario.get("customDsl"):
+        candidates += dsl_candidates(str(scenario["customDsl"]))
+    if not candidates or ctx.network is None:
+        return
+    route_native(
+        ctx.network,
+        candidates,
+        ctx.notes,
+        rolling_enabled=bool(getattr(ctx.rolling, "enabled", False)),
+        stochastic_enabled=bool(getattr(ctx.stochastic, "enabled", False)),
+    )
 
 
 def _dsl_fallback(data: dict[str, Any]) -> dict[str, Any]:

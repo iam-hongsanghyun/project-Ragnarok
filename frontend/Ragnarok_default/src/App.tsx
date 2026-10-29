@@ -57,6 +57,7 @@ import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook
 import { formatCostBasisMigration } from 'lib/settings/costBasisMigration';
 import { mergeWorkbookFragmentRemote } from 'lib/workbook/mergeFragment';
 import { applyPlantChange, type PlantChange } from 'lib/build/plants';
+import { previewDetach } from 'lib/api/plants';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
 import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
@@ -113,7 +114,8 @@ import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { SitingView } from './views/SitingView';
 import { ScreeningView } from './views/ScreeningView';
 import type { SitingHandoff } from 'lib/screening/screening';
-import { P2XView } from './modules/p2x/P2XView';
+import { CompositesView } from './modules/composites/CompositesView';
+import { CompositeEditModal } from './modules/composites/CompositeEditModal';
 import { ReportingView } from './views/ReportingView';
 import { TrainingView } from './views/TrainingView';
 import { SpotlightOverlay } from './features/training/SpotlightOverlay';
@@ -355,6 +357,10 @@ function AppInner() {
   // across reloads (was restoring the last view, e.g. Comparison) — unless the
   // URL carries `?view=<tab id>` (host embedding), see initialTabFromUrl.
   const [tab, setTab] = useState<WorkspaceTab>(initialTabFromUrl);
+  /** A composite the Build map asked to open in the Composites tab. */
+  const [compositeFocus, setCompositeFocus] = useState<string | null>(null);
+  /** A composite whose edit form is open in a popup over the current tab. */
+  const [compositePopup, setCompositePopup] = useState<string | null>(null);
   // Training walkthrough. Lives here, not in TrainingView, so a walkthrough can
   // switch views and keep running — TrainingView unmounts the moment it does.
   // `stepId` ties the walkthrough to the tutorial step it belongs to, so the
@@ -2499,7 +2505,33 @@ function AppInner() {
     }
   };
 
+  // A row a composite owns (its `plant` column) is re-derived whenever the composite is edited, so a direct edit would be lost:
+  // ask first. Edit composite opens the Composites tab at that instance; Detach turns its rows into plain components.
+  const guardOwnedRow = (sheet: SheetName, rowIndex: number, key: string): boolean => {
+    if (sheet.startsWith('RAGNAROK') || key === 'plant') return false;
+    const row = modelRef.current[sheet]?.[rowIndex];
+    const owner = row ? String(row.plant ?? '').trim() : '';
+    if (!owner) return false;
+    void (async () => {
+      const what = `Row "${String(row?.name ?? '')}" belongs to composite ${owner}, which is one asset: its rows are re-derived whenever the composite is edited, so a direct edit would be overwritten.`;
+      if (enabledModules.has('Composites') && await confirmDialog(`${what} Open the composite to edit it instead?`, { confirmText: 'Edit composite' })) {
+        setCompositePopup(owner);
+        return;
+      }
+      if (await confirmDialog(`${what} Detach ${owner} instead? Its rows stay with every value as plain components, editable here, and are no longer one asset.`, { confirmText: 'Detach' })) {
+        try {
+          const prev = await previewDetach(owner, modelRef.current);
+          await handleApplyPlantChange(prev.change, `Detached composite ${owner}`);
+        } catch (error) {
+          showToast(`Could not detach ${owner}: ${error instanceof Error ? error.message : 'unknown error'}`, 'error');
+        }
+      }
+    })();
+    return true;
+  };
+
   const updateRowValue = (sheet: SheetName, rowIndex: number, key: string, value: Primitive) => {
+    if (guardOwnedRow(sheet, rowIndex, key)) return;
     pushHistory();
     setModel((current) => {
       const nextRows = (current[sheet] ?? []).map((row, index) => (index === rowIndex ? { ...row, [key]: value } : row));
@@ -4127,7 +4159,8 @@ function AppInner() {
               onOpenConstraintsWorkspace={() => handleSettingsNavigate('constraints')}
               onSessionSync={handleSessionSync}
               onApplyConversion={handleApplyConversion}
-              onApplyPlantChange={handleApplyPlantChange}
+              onOpenComposites={(plantId) => { setCompositeFocus(plantId ?? null); setTab('Composites'); }}
+              hasComposites={enabledModules.has('Composites')}
               discountRate={settings.discountRate}
               requestedStep={guide?.stops[guide.index]?.buildStep ?? null}
               snapshotWeight={snapshotWeight}
@@ -4183,6 +4216,9 @@ function AppInner() {
               model={model}
               bounds={bounds}
               busIndex={busIndex}
+              onApplyPlantChange={handleApplyPlantChange}
+              onEditComposite={enabledModules.has('Composites') ? setCompositePopup : undefined}
+              onOpenComposite={enabledModules.has('Composites') ? (plantId) => { setCompositeFocus(plantId ?? null); setTab('Composites'); } : undefined}
               onUpdateRow={updateRowValue}
               onAddRow={addRow}
               onDeleteRow={deleteRow}
@@ -4198,7 +4234,7 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               dateFormat={settings.dateFormat}
               seriesSheetCounts={sessionSeriesCounts}
-              onApplyPlantChange={handleApplyPlantChange}
+              
               hasResults={Boolean(results)}
               onOpen={handleOpenWorkbook}
               onSave={saveWorkbook}
@@ -4329,11 +4365,25 @@ function AppInner() {
             />
           )}
 
-          {tab === 'P2X' && enabledModules.has('P2X') && (
-            <P2XView
+          {compositePopup && enabledModules.has('Composites') && (
+            <CompositeEditModal
+              model={model}
+              plantId={compositePopup}
+              discountRate={settings.discountRate}
+              onApply={handleApplyPlantChange}
+              onClose={() => setCompositePopup(null)}
+              onOpenInComposites={(plantId) => { setCompositeFocus(plantId); setTab('Composites'); }}
+            />
+          )}
+
+          {tab === 'Composites' && enabledModules.has('Composites') && (
+            <CompositesView
               model={model}
               discountRate={settings.discountRate}
-              onApplyFragment={handleApplyImportedFragment}
+              currencySymbol={settings.currencySymbol}
+              onApplyPlantChange={handleApplyPlantChange}
+              focusPlantId={compositeFocus}
+              onFocusHandled={() => setCompositeFocus(null)}
             />
           )}
 

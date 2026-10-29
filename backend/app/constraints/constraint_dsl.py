@@ -438,8 +438,11 @@ def apply_dsl_constraints(
     emissions_factors: dict[str, float],
     notes: list[str],
     snapshots: object | None = None,
+    skip: frozenset[int] = frozenset(),
 ) -> None:
     """Parse and apply the DSL text to ``n.model``.
+
+    ``skip`` holds line numbers already written as native ``GlobalConstraint`` rows (:mod:`.native_routing`).
 
     A line whose selector matches nothing is skipped with a note; a parse or
     compile failure raises HTTP 400 once every line has been tried.
@@ -453,7 +456,7 @@ def apply_dsl_constraints(
     failures: list[str] = []
     for n0, raw in enumerate(text.splitlines(), start=1):
         line = raw.split("#", 1)[0].strip()
-        if not line:
+        if not line or n0 in skip:
             continue
         name = f"dsl_{n0}"
         try:
@@ -477,8 +480,11 @@ def apply_constraint_specs(
     emissions_factors: dict[str, float],
     notes: list[str],
     snapshots: object | None = None,
+    skip: frozenset[int] = frozenset(),
 ) -> None:
     """Apply a structured JSON constraint spec list to ``n.model``.
+
+    ``skip`` holds 1-based spec numbers already written as native ``GlobalConstraint`` rows.
 
     This is the canonical wire format the frontend sends; the text DSL is only a
     convenience that compiles to the same shape. A spec whose selector matches
@@ -490,6 +496,8 @@ def apply_constraint_specs(
     ctx = build_model_context(n, emissions_factors, snapshots)
     failures: list[str] = []
     for idx, spec in enumerate(specs, start=1):
+        if idx in skip:
+            continue
         name = f"spec_{idx}"
         try:
             pc = _spec_to_parsed(spec, idx)

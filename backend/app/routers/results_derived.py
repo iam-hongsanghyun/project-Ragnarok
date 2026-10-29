@@ -225,6 +225,7 @@ def get_run_kpis(name: str, currency: str = "$", period: int | None = None) -> d
             result = {**result, "runMeta": {**(result.get("runMeta") or {}), "modeledHours": stats["modeledHours"]}}
     kpis = rd.compute_kpis(
         result, model_static.get("carriers") or [], rd._storage_carriers(model_static), currency, load_fallback,
+        converted_carriers=rd._converted_carriers(model_static),
     )
     return {"run": name, "period": period, "kpis": kpis}
 

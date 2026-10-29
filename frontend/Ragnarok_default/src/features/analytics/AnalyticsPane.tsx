@@ -125,7 +125,7 @@ export function AnalyticsPane({
            * curated preset so code updates show up immediately. Analytics
            * keeps localStorage persistence for user-built dashboards. */
           storageKey={subTab === 'Result' ? null : ANALYTICS_STORAGE_KEY}
-          initialLayout={subTab === 'Result' ? buildResultPreset(results) : PRESETS[0].build()}
+          initialLayout={subTab === 'Result' ? buildResultPreset(results, model) : PRESETS[0].build()}
           showPresets={subTab === 'Analytics'}
           onNeedSeries={onNeedSeries}
           onNeedAssets={onNeedAssets}

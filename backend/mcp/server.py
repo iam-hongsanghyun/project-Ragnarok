@@ -22,27 +22,10 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from .catalogue import AREAS, build_instructions, declare_areas, render_catalogue  # noqa: F401
 from .client import RagnarokClient
 
-_INSTRUCTIONS = (
-    "Drive a PyPSA power-system model in Ragnarok: introspect the loaded model, "
-    "import/build data, edit and transform sheets, solve, and read results. "
-    "Read-only tools are safe to call freely. Mutating tools (imports, edits, "
-    "transforms, solves) may return a preview asking you to re-call with "
-    "confirm=true — that is the human-in-the-loop guard, not an error. All tools "
-    "act on one shared working session, visible live in the Ragnarok web UI.\n\n"
-    "Solve-mode analytics: seven reliability/market studies (reserves, "
-    "forced-outage Monte Carlo, ramping, correlated sampling, ELCC, "
-    "convergence sampling, LMP decomposition) ride the same solve — call "
-    "describe_analytics for their option keys, config fields and where each "
-    "lands in get_analytics(run), then enable them via submit_solve's options.\n\n"
-    "Physical risk: a separate climate-damage subsystem with its OWN "
-    "server-minted session id. Workflow: physical_risk_seed (build a portfolio "
-    "from the current model) -> optional physical_risk_set_scenario (perils, "
-    "climate, horizon) -> physical_risk_run (polls to completion) -> "
-    "physical_risk_transition / physical_risk_finance / physical_risk_report for "
-    "the results. Every physical_risk_* tool defaults to the seeded session."
-)
+_INSTRUCTIONS = build_instructions()  # routing map + recipes, generated from catalogue.AREAS
 
 # ── shared client (created in lifespan; lazily in tests / introspection) ────────
 _client: RagnarokClient | None = None
@@ -142,7 +125,7 @@ async def source_health(sources: str | None = None) -> Any:
 
 @mcp.tool(
     annotations=_RO,
-    description="What's loaded in the working session: buses, carriers, snapshot window, sheet list and sizes. Empty {} if nothing is loaded.",
+    description="What is loaded right now in the working session: buses, carriers, snapshot window, sheet list and sizes. Empty {} if nothing is loaded.",
 )
 async def get_world_state() -> Any:
     meta = await get_client().get_meta()
@@ -215,7 +198,7 @@ async def get_report(run_name: str, perspective: str) -> Any:
 
 @mcp.tool(
     annotations=_RO,
-    description="A specific derived metric for a stored run (e.g. dispatch_by_carrier, duration curve). Windowed + downsampled.",
+    description="A specific derived metric for a stored run: hourly dispatch by carrier (dispatch_by_carrier), duration curve, generation series. Windowed + downsampled.",
 )
 async def get_derived(
     run_name: str,
@@ -501,7 +484,7 @@ _ANALYTICS_REFERENCE: list[dict[str, Any]] = [
 
 @mcp.tool(
     annotations=_RO,
-    description="The seven solve-mode reliability/market analytics (reserves, forced-outage Monte Carlo, ramping, correlated sampling, ELCC, convergence sampling, LMP decomposition): for each, the options.* key that enables it, its purpose, key config fields, and where its result lands in get_analytics(run). Enable them via submit_solve's options; no separate call.",
+    description="Reliability and adequacy (loss of load, LOLE, EENS) and market analytics: the seven solve-mode reliability/market analytics (reserves, forced-outage Monte Carlo, ramping, correlated sampling, ELCC, convergence sampling, LMP decomposition): for each, the options.* key that enables it, its purpose, key config fields, and where its result lands in get_analytics(run). Enable them via submit_solve's options; no separate call.",
 )
 async def describe_analytics() -> Any:
     return {
@@ -542,7 +525,7 @@ async def edit_sheet(
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, openWorldHint=False
     ),
-    description="Regenerate the snapshot index over [start,end] at step_hours and reindex every temporal sheet onto it. fill: 'tile' (cycle) or 'pad' (repeat last). Dates like '2030-01-01'.",
+    description="Change the time step / resolution (시간 단위, e.g. hourly to 3-hourly) and the date window: regenerate the snapshot index over [start,end] at step_hours and reindex every temporal sheet onto it. fill: 'tile' (cycle) or 'pad' (repeat last). Dates like '2030-01-01'.",
 )
 async def retarget_snapshots(
     start: str,
@@ -564,7 +547,7 @@ async def retarget_snapshots(
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, openWorldHint=False
     ),
-    description="Project demand to a future year. method: cagr|linear (apply growth_pct) or regression|arima|prophet (fit trend, needs ≥3y history). grow_sheets defaults to demand.",
+    description="Forecast demand growth to a future year (load projection). method: cagr|linear (apply growth_pct) or regression|arima|prophet (fit trend, needs ≥3y history). grow_sheets defaults to demand.",
 )
 async def forecast_demand(
     from_year: int,
@@ -708,7 +691,7 @@ async def cluster_network(
         readOnlyHint=False, destructiveHint=True, openWorldHint=False
     ),
     description=(
-        "Adjust a carrier's total capacity to a target (MW), distributed across that "
+        "Increase or decrease the total installed capacity of a carrier (e.g. all gas, wind or solar generators) to a target (MW), distributed across that "
         "carrier's generators. method: 'proportional' (keep current ratios) | 'equal' | "
         "'custom' (per-generator MW in `shares`, must sum to target_mw). mode: 'cap' "
         "writes p_nom_max and marks units extendable — built capacity is bounded AT the "
@@ -831,7 +814,7 @@ async def add_generator(
 
 @mcp.tool(
     annotations=_BUILD_ANN,
-    description="Add a load on a bus. p_set is the static demand (MW); use a loads-p_set time series for time-varying demand.",
+    description="Add a load (electricity demand) on a bus. p_set is the static demand (MW); use a loads-p_set time series for time-varying demand.",
 )
 async def add_load(
     name: str,
@@ -851,7 +834,7 @@ async def add_load(
 
 @mcp.tool(
     annotations=_BUILD_ANN,
-    description="Add an AC line between two buses (bus0, bus1). s_nom = rating (MVA); set s_nom_extendable=true to size it. extra passes r/x/length etc.",
+    description="Add an AC transmission line between two buses (bus0, bus1). s_nom = rating (MVA); set s_nom_extendable=true to size it. extra passes r/x/length etc.",
 )
 async def add_line(
     name: str,
@@ -889,7 +872,7 @@ async def add_line(
 
 @mcp.tool(
     annotations=_BUILD_ANN,
-    description="Add a storage unit on a bus (battery, PHS, …). max_hours = energy/power ratio. capital_cost is PyPSA's per-horizon cost per MW of power, used as is; pass overnight_cost, lifetime and discount_rate in extra for PyPSA to annuitise. extra passes efficiency_store/dispatch, standing_loss, etc.",
+    description="Add a battery (BESS, 배터리), pumped hydro or other storage unit on a bus (basic StorageUnit row; for a battery with real characteristics see add_plant type bess). max_hours = energy/power ratio. capital_cost is PyPSA's per-horizon cost per MW of power, used as is; pass overnight_cost, lifetime and discount_rate in extra for PyPSA to annuitise. extra passes efficiency_store/dispatch, standing_loss, etc.",
 )
 async def add_storage(
     name: str,
@@ -1177,7 +1160,7 @@ async def import_dataset(
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, openWorldHint=True
     ),
-    description="One-click: assemble a runnable model for a country from keyless global sources (OSM network, power plants, demand) and load it as the working model. iso3 like 'KOR'. Replaces the current model.",
+    description="One-click: import a country's power plants, network and demand: assemble a runnable model for a country from keyless global sources (OSM network, power plants, demand) and load it as the working model. iso3 like 'KOR'. Replaces the current model.",
 )
 async def one_click_model(iso3: str, confirm: bool = False) -> Any:
     client = get_client()
@@ -1233,7 +1216,7 @@ async def build_starter_pack(iso3: str, year: str, confirm: bool = False) -> Any
         idempotentHint=False,
         openWorldHint=False,
     ),
-    description="Solve the working model (submits to the queue — visible live in the web UI). scenario/options are the run config (carbon price, discount, solve mode…). With wait=true, blocks up to timeout_s then returns the run's analytics; else returns the job id to poll via get_queue.",
+    description="Run / solve (optimise) the working model (submits to the queue — visible live in the web UI). scenario/options are the run config (carbon price, discount, solve mode…). With wait=true, blocks up to timeout_s then returns the run's analytics; else returns the job id to poll via get_queue.",
 )
 async def submit_solve(
     scenario: dict[str, Any] | None = None,
@@ -1561,7 +1544,7 @@ async def run_plugin_contribute(
 
 @mcp.tool(
     annotations=_MUT,
-    description="Undo a single journal entry by id (self-correct a bad edit). Blocked with a conflict if a LATER entry overlaps the same cells — undo the newer one first, or use revert_session. Find entry ids with get_journal.",
+    description="Undo my last edit: undo a single journal entry by id (self-correct a bad edit). Blocked with a conflict if a LATER entry overlaps the same cells — undo the newer one first, or use revert_session. Find entry ids with get_journal.",
 )
 async def undo_journal_entry(entry_id: int, confirm: bool = False) -> Any:
     client = get_client()
@@ -1583,7 +1566,7 @@ async def revert_session(to_version: int, confirm: bool = False) -> Any:
 
 @mcp.tool(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
-    description="Cancel a queued solve, or kill it if already running — a SAFETY action, never gated, so you can always stop a job you started. The queue row is kept (rerun_queue_item re-runs it); use delete_queue_item to remove it. item_id comes from get_queue.",
+    description="Cancel or stop a queued or running solve (kill it) — a SAFETY action, never gated, so you can always stop a job you started. The queue row is kept (rerun_queue_item re-runs it); use delete_queue_item to remove it. item_id comes from get_queue.",
 )
 async def cancel_solve(item_id: str) -> Any:
     return await get_client().cancel_queue_item(item_id)
@@ -1800,7 +1783,7 @@ async def import_project(path: str, persist: bool = False, confirm: bool = False
 
 @mcp.tool(
     annotations=_EXPORT_ANN,
-    description="Save the CURRENT working model as an input-only workbook (.xlsx) — the GUI's Save / Save As: every input sheet incl. time series plus the Ragnarok config sheets, no result sheets. 'dest' overrides the path. Does not change the model.",
+    description="Save / export the CURRENT working model to an Excel workbook (.xlsx), input-only — the GUI's Save / Save As: every input sheet incl. time series plus the Ragnarok config sheets, no result sheets. 'dest' overrides the path. Does not change the model.",
 )
 async def export_workbook(dest: str | None = None) -> Any:
     data, suggested = await get_client().export_workbook()
@@ -1867,7 +1850,7 @@ async def list_examples() -> Any:
 
 @mcp.tool(
     annotations=_MUT,
-    description="Load a bundled example as the working model (replaces the current model). Ids from list_examples. Re-call with confirm=true to apply.",
+    description="Load an example model (sample network) as the working model (replaces the current model). Ids from list_examples. Re-call with confirm=true to apply.",
 )
 async def load_example(example_id: str, confirm: bool = False) -> Any:
     if _needs_confirm(cheap=False) and not confirm:
@@ -2290,7 +2273,7 @@ async def physical_risk_libraries() -> Any:
 
 @mcp.tool(
     annotations=_PR_WRITE_ANN,
-    description="Seed a physical-risk portfolio from the CURRENT working model (one exposure per generator / storage unit with coordinates). Mints a physical-risk session, caches it for the other physical_risk_* tools, and returns the session id, asset count and a few sample assets. Non-destructive to the model.",
+    description="Start a physical climate-risk analysis (flood, heatwave, wildfire damage to assets): seed a physical-risk portfolio from the CURRENT working model (one exposure per generator / storage unit with coordinates). Mints a physical-risk session, caches it for the other physical_risk_* tools, and returns the session id, asset count and a few sample assets. Non-destructive to the model.",
 )
 async def physical_risk_seed(
     default_value_per_mw: float | None = None, currency: str = "USD"
@@ -2466,6 +2449,126 @@ async def physical_risk_report(session_id: str | None = None) -> Any:
     return await get_client().physical_risk_report(sid)
 
 
+# ── tool areas (single source of truth for tool_catalogue, the routing instructions and the docs) ──
+declare_areas({
+    "list_importers": "data",
+    "source_health": "data",
+    "get_world_state": "inspect",
+    "get_sheet_page": "inspect",
+    "derive_series": "inspect",
+    "list_runs": "results",
+    "get_analytics": "results",
+    "list_report_perspectives": "results",
+    "get_report": "results",
+    "get_derived": "results",
+    "get_queue": "run",
+    "list_components": "inspect",
+    "describe_component": "inspect",
+    "describe_run_options": "run",
+    "list_plugins": "session",
+    "list_tab_modules": "session",
+    "install_tab_module": "session",
+    "set_tab_module_enabled": "session",
+    "remove_tab_module": "session",
+    "describe_analytics": "studies",
+    "edit_sheet": "build",
+    "retarget_snapshots": "time_ops",
+    "forecast_demand": "transforms",
+    "driver_forecast": "transforms",
+    "ev_reshape_demand": "transforms",
+    "cluster_network": "transforms",
+    "adjust_carrier_capacity": "build",
+    "add_bus": "build",
+    "add_generator": "build",
+    "add_load": "build",
+    "add_line": "build",
+    "add_storage": "build",
+    "set_snapshots": "time_ops",
+    "add_component": "build",
+    "set_component": "build",
+    "remove_component": "build",
+    "transform_series": "transforms",
+    "clear_session": "session",
+    "attach_renewable_profiles": "data",
+    "attach_hydro_inflow": "data",
+    "import_dataset": "data",
+    "one_click_model": "data",
+    "build_starter_pack": "data",
+    "submit_solve": "run",
+    "validate_model": "inspect",
+    "check_model": "inspect",
+    "get_sheet_stats": "inspect",
+    "get_series_window": "inspect",
+    "get_run_series": "results",
+    "get_journal": "session",
+    "get_journal_diff": "session",
+    "get_master_meta": "data",
+    "run_plugin_analysis": "session",
+    "optimize_procurement": "studies",
+    "forge_query": "build",
+    "promote_run": "run",
+    "derive_from_master": "transforms",
+    "run_plugin_transform": "session",
+    "run_plugin_contribute": "session",
+    "undo_journal_entry": "session",
+    "revert_session": "session",
+    "cancel_solve": "run",
+    "rerun_queue_item": "run",
+    "delete_queue_item": "run",
+    "set_queue_concurrency": "run",
+    "rename_run": "run",
+    "delete_run": "run",
+    "export_run": "data",
+    "export_model": "data",
+    "import_network": "data",
+    "import_project": "data",
+    "export_workbook": "data",
+    "import_result": "data",
+    "get_server_info": "session",
+    "get_server_log": "session",
+    "reload_config": "session",
+    "list_examples": "data",
+    "load_example": "data",
+    "list_import_databases": "data",
+    "list_starter_packs": "data",
+    "list_import_countries": "data",
+    "get_import_provenance": "data",
+    "list_import_secrets": "data",
+    "set_import_secret": "data",
+    "delete_import_secret": "data",
+    "get_distinct_values": "inspect",
+    "get_run_model_sheet": "results",
+    "load_queue_item": "run",
+    "import_master": "data",
+    "clear_master": "data",
+    "get_plugin": "session",
+    "install_plugin": "session",
+    "uninstall_plugin": "session",
+    "refresh_plugins": "session",
+    "list_plugin_files": "session",
+    "upload_plugin_file": "session",
+    "delete_plugin_file": "session",
+    "get_plugin_options": "session",
+    "run_plugin_action": "session",
+    "install_tab_module_zip": "session",
+    "siting_scan": "siting",
+    "pypsa_earth_status": "data",
+    "pypsa_earth_configure": "data",
+    "pypsa_earth_build": "data",
+    "pypsa_earth_build_status": "data",
+    "pypsa_earth_stop": "data",
+    "pypsa_earth_apply": "data",
+    "physical_risk_libraries": "physical_risk",
+    "physical_risk_seed": "physical_risk",
+    "physical_risk_get_portfolio": "physical_risk",
+    "physical_risk_set_scenario": "physical_risk",
+    "physical_risk_run": "physical_risk",
+    "physical_risk_get_run": "physical_risk",
+    "physical_risk_transition": "physical_risk",
+    "physical_risk_finance": "physical_risk",
+    "physical_risk_report": "physical_risk",
+})
+
 # Run-spec tools (saved scenarios, carbon library, DSL sheet) - WA3-WA6.
 from . import tools_runspec  # noqa: E402,F401
 
@@ -2499,3 +2602,6 @@ from . import tools_plants  # noqa: E402,F401
 # Carbon-pricing and annual-budgets module tools.
 from . import tools_policy_modules  # noqa: E402,F401
 from . import tools_operations_modules  # noqa: E402,F401
+
+# Task routing: the tool_catalogue tool (read-only). Imported last so every area is declared.
+from . import tools_catalogue  # noqa: E402,F401

@@ -25,6 +25,7 @@ from typing import Any
 
 from mcp.types import ToolAnnotations
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp, submit_solve
 
 _SUBMIT = ToolAnnotations(
@@ -268,7 +269,7 @@ async def delete_scenario(scenario_id: str, confirm: bool = False) -> Any:
 @mcp.tool(
     annotations=_EDIT,
     description=(
-        "Replace the model's custom-constraint DSL sheet (RAGNAROK_CustomDSL) — one constraint per line, e.g. "
+        "Add custom constraints, e.g. a CO2 emissions cap or a generation limit per carrier: replace the model's custom-constraint DSL sheet (RAGNAROK_CustomDSL) — one constraint per line, e.g. "
         "'gen(\"gas\") <= 120' or 'emissions() <= 5000'. Lines are parsed with the solver's own parser and the "
         "save is refused if any line does not parse (allow_errors=true saves anyway; such a sheet then blocks "
         "runs that use it). An empty text clears the sheet. The sheet applies to runs that carry no "
@@ -279,3 +280,16 @@ async def set_custom_dsl(text: str, allow_errors: bool = False, confirm: bool = 
     if _needs_confirm(cheap=True) and not confirm:
         return _preview("Replace the custom-constraint DSL sheet.", {"text": text, "allow_errors": allow_errors})
     return await get_client().set_custom_dsl(text, allow_errors=allow_errors)
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "list_scenarios": "run",
+    "describe_scenario": "run",
+    "submit_scenario": "run",
+    "submit_scenarios": "run",
+    "save_scenario": "run",
+    "set_active_scenario": "run",
+    "delete_scenario": "run",
+    "set_custom_dsl": "policy",
+})

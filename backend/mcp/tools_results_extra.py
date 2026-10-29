@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _RO, get_client, mcp
 
 
@@ -162,3 +163,12 @@ async def get_run_analysis(
         escalationPct=escalation_pct, strandedThreshold=stranded_threshold, demandGrowthPct=demand_growth_pct,
         fuelGrowthPct=fuel_growth_pct, currency=currency,
     )
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "compare_run_statistics": "results",
+    "get_metric_options": "results",
+    "get_period_results": "results",
+    "get_run_analysis": "results",
+})

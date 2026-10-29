@@ -957,6 +957,18 @@ def _storage_carriers(model: Model) -> set[str]:
     return out
 
 
+def _converted_carriers(model: Model) -> set[str]:
+    """Carriers of Link / Process rows: electricity they put on a bus is converted fuel (a CCGT, a
+    co-fired turbine, a fuel cell), not renewable generation, so the KPI share counts it as non-renewable."""
+    out: set[str] = set()
+    for sheet in ("links", "processes"):
+        for row in model.get(sheet) or []:
+            c = string_value(row.get("carrier"))
+            if c:
+                out.add(c)
+    return out
+
+
 def is_renewable_carrier(carrier: str, co2_emissions: float, storage_carriers: set[str]) -> bool:
     if co2_emissions > 0:
         return False
@@ -979,8 +991,14 @@ def compute_kpis(
     storage_carriers: set[str] | None = None,
     currency_symbol: str = "$",
     system_load_per_snapshot: Callable[[], list[float]] | None = None,
+    converted_carriers: set[str] | None = None,
 ) -> dict[str, Any]:
     """The nine headline metrics of the KPI strip for one run.
+
+    ``renewableSharePct`` = 100 x renewable electricity / all electricity supplied to the electricity
+    buses (``carrierMix``). A carrier is renewable when its ``co2_emissions`` is 0 and it is not a storage
+    carrier, nuclear, or one of ``converted_carriers`` (carriers of Links / Processes, e.g. a gas + H2
+    co-fired turbine: its output is not split by hydrogen share and counts as non-renewable).
 
     ``carriers`` are the model's ``carriers`` rows (for ``co2_emissions``);
     ``system_load_per_snapshot`` is a lazy fallback used only when the summary
@@ -1052,7 +1070,7 @@ def compute_kpis(
     load_factor = avg_load / peak_load if peak_load and avg_load else None
 
     by_name = {string_value(c.get("name")): c for c in carriers}
-    storage = storage_carriers or set()
+    storage = (storage_carriers or set()) | (converted_carriers or set())
     renewable_mwh = sum(
         number_value(m.get("value")) for m in carrier_mix
         if is_renewable_carrier(

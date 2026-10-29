@@ -7870,7 +7870,7 @@ code, kbd, samp, tt,
 }
 
 /* Any button inside the workspace */
-.workspace-main button:not(.tb-btn):not(.run-button):not(.primary-button):not(.ghost-button):not(.secondary-button):not(.tab-button):not(.subnav-btn):not(.analytics-subtab):not(.settings-nav-item):not(.activity-bar-btn):not(.sheet-tree-item):not(.sheet-tree-group-header):not(.gcc-del):not(.tab-button):not(.sg-module-card-header):not(.subnav-btn):not(.plugin-rail-item):not(.ss-input):not(.cmp-chip):not(.cmp-seg-btn):not(.cmp-sel-x):not(.cmp-add-btn):not(.cmp-gear) {
+.workspace-main button:not(.tb-btn):not(.run-button):not(.primary-button):not(.ghost-button):not(.secondary-button):not(.tab-button):not(.subnav-btn):not(.analytics-subtab):not(.settings-nav-item):not(.activity-bar-btn):not(.sheet-tree-item):not(.sheet-tree-group-header):not(.gcc-del):not(.tab-button):not(.sg-module-card-header):not(.subnav-btn):not(.plugin-rail-item):not(.ss-input):not(.cmp-chip):not(.cmp-seg-btn):not(.cmp-sel-x):not(.cmp-add-btn):not(.cmp-gear):not(.sld-btn):not(.network-switch-btn) {
   font-family: inherit;
   font-size: var(--fs-md);
   font-weight: 500;

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .catalogue import declare_areas
 from .server import _MUT, _RO, _autonomy, _needs_confirm, get_client, mcp
 
 
@@ -43,7 +44,7 @@ def _gated_preview(preview: dict[str, Any]) -> dict[str, Any]:
 @mcp.tool(
     annotations=_RO,
     description=(
-        "Side-by-side comparison of 2-5 stored runs - the Analytics -> Comparison matrix as data. "
+        "Compare scenarios: side-by-side comparison (base vs alternative) of 2-5 stored runs - the Analytics -> Comparison matrix as data. "
         "'topics' picks columns of detail: kpi (summary KPIs with the generator/storage capacity split), "
         "generation-mix, installed-capacity (solved p_nom_opt by carrier), cost, emissions, capacity "
         "(expansion installed vs optimised), generation-time (carrier dispatch series, strided to <=600 points). "
@@ -57,7 +58,7 @@ async def compare_runs(run_names: list[str], topics: list[str] | None = None) ->
 @mcp.tool(
     annotations=_RO,
     description=(
-        "The KPI strip of a stored run: total cost, dispatch MWh, load-weighted average price (n.statistics.prices), min/max price, peak load MW, "
+        "Headline results of a stored run: total system cost, emissions, dispatch MWh, load-weighted average price (n.statistics.prices), min/max price, peak load MW, "
         "load factor, renewable share % (zero-emission carriers excluding nuclear and storage), emissions, "
         "snapshot count and weight. Numbers match the Analytics KPI card. 'period' picks one investment period "
         "of a pathway run (money x the period's objective weight, inactive assets masked); omitted = the whole horizon."
@@ -149,7 +150,7 @@ _ADJUSTMENT_DOC = (
 @mcp.tool(
     annotations=_MUT,
     description=(
-        "Forge bulk adjust: " + _ADJUSTMENT_DOC + " Later adjustments see earlier ones. multiply/add skip rows "
+        "Increase, decrease or set values in bulk, e.g. scale all gas generator capacity or costs by a percentage (Forge bulk adjust): " + _ADJUSTMENT_DOC + " Later adjustments see earlier ones. multiply/add skip rows "
         "whose attribute is not numeric; set always writes. Returns {changed, perAdjustment, baseline}; keep "
         "'baseline' to undo with revert_adjustments (it holds the ORIGINAL values, first touch wins). Without "
         "confirm=true returns the dry-run counts only."
@@ -188,7 +189,7 @@ async def revert_adjustments(
 @mcp.tool(
     annotations=_MUT,
     description=(
-        "Build: add one conversion technology to the working model - the Link plus any missing carrier bus, carriers "
+        "Add a heat pump, electric boiler, CHP, fuel cell, methanation or simple gas turbine conversion link to the working model - the Link plus any missing carrier bus, carriers "
         "and (for gas-fed templates) a fuel-supply generator, reusing existing ones. 'template_id' from "
         "list_conversions; 'anchor_bus' is the electricity bus (default: first electricity bus); p_nom is MW of "
         "input capacity unless extendable=true (the solver sizes it: the row carries PyPSA's overnight_cost, "
@@ -228,3 +229,18 @@ async def merge_fragment(fragment: dict[str, Any], confirm: bool = False) -> Any
     res = await get_client().merge_fragment(fragment, apply=not gated)
     res.pop("model", None)  # counts, not the merged model
     return _gated_preview(res) if gated else res
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "compare_runs": "results",
+    "get_kpis": "results",
+    "compare_companies": "results",
+    "get_asset_details": "results",
+    "list_conversions": "composites",
+    "snap_to_buses": "build",
+    "adjust_values": "build",
+    "revert_adjustments": "build",
+    "add_conversion": "composites",
+    "merge_fragment": "data",
+})

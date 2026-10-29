@@ -5,6 +5,7 @@ from typing import Any
 
 from backend.app import module_hooks as mh
 
+from .rows import elastic_kwargs, network_has_elastic, network_has_shift, shift_kwargs
 from .shift import (
     apply_demand_response,
     apply_price_elastic,
@@ -14,28 +15,33 @@ from .shift import (
 
 MODULE = "demand-response"
 
+_APPLY_HINT = "Write them into the workbook with the demand-response apply step (POST /api/demand-response/apply)."
+
 
 def _rewire(ctx: mh.RunContext) -> None:
-    """Rewire tagged loads into the shiftable (DR bus + Link + Store) and price-elastic patterns."""
+    """Build what the workbook holds; create the ``dr_*`` components only for a workbook without them.
+
+    The module's components are workbook rows written by the explicit apply step (:mod:`.rows`), and the core
+    build already added them. The in-build rewiring below is the BACK-COMPAT path for stored runs and old
+    workbooks whose ``options.demandResponseConfig`` asks for demand response but which carry no ``dr_*`` rows:
+    it creates the same components, as builds did before the apply step existed, and says so in the notes.
+    """
     dr_cfg = ctx.options.get("demandResponseConfig") or {}
-    if dr_cfg.get("enabled"):
-        apply_demand_response(
-            ctx.network,
-            ctx.notes,
-            enabled=True,
-            loads=dr_cfg.get("loads") or None,
-            shift_fraction=float(dr_cfg.get("shiftFraction", 0.2) or 0.0),
-            max_shift_hours=float(dr_cfg.get("maxShiftHours", 4.0) or 0.0),
-        )
-    if dr_cfg.get("elasticEnabled"):
-        apply_price_elastic(
-            ctx.network,
-            ctx.notes,
-            enabled=True,
-            loads=dr_cfg.get("loads") or None,
-            fraction=float(dr_cfg.get("elasticFraction", 0.2) or 0.0),
-            wtp_max=float(dr_cfg.get("wtpMax", 200.0) or 0.0),
-        )
+    shift, elastic = shift_kwargs(dr_cfg), elastic_kwargs(dr_cfg)
+
+    n_shift = network_has_shift(ctx.network)
+    if n_shift:
+        ctx.notes.append(f"Demand response: {n_shift} shiftable load(s) from the workbook rows (dr_* bus, drlink_* link, drstore_* store).")
+    elif shift["enabled"]:
+        ctx.notes.append(f"Demand response (legacy): the workbook has no dr_* rows, so the shiftable loads are created at build time. {_APPLY_HINT}")
+        apply_demand_response(ctx.network, ctx.notes, **shift)
+
+    n_elastic = network_has_elastic(ctx.network)
+    if n_elastic:
+        ctx.notes.append(f"Price-elastic demand: {n_elastic} block(s) from the workbook rows (load_shedding_elastic_* generators).")
+    elif elastic["enabled"]:
+        ctx.notes.append(f"Price-elastic demand (legacy): the workbook has no elastic rows, so the blocks are created at build time. {_APPLY_HINT}")
+        apply_price_elastic(ctx.network, ctx.notes, **elastic)
 
 
 def _outcome(ctx: mh.RunContext) -> dict[str, Any]:

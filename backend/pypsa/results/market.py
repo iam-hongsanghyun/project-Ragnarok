@@ -222,12 +222,17 @@ def build_applied_constraints(network: pypsa.Network) -> list[dict[str, Any]]:
     (any other name, e.g. ``cf_max_coal``). Read-only — surfaced so the GUI can
     show what was applied, including plugin contributions that are otherwise
     invisible. Each entry: ``{name, source, shadowPrice}``.
+
+    A custom / DSL constraint PyPSA's ``GlobalConstraint`` expresses exactly is a native row
+    (:mod:`backend.app.constraints.native_routing`, same ``cc_`` / ``spec_`` / ``dsl_`` name): it is listed
+    here too, ``native: True``, with ``shadowPrice`` = ``global_constraints.mu``, which equals the linopy dual
+    of the same row (same sign and unit), so the entry reads the same either way.
     """
+    out: list[dict[str, Any]] = _native_applied_constraints(network)
     try:
         names = list(network.model.constraints)
     except Exception:
-        return []
-    out: list[dict[str, Any]] = []
+        return out
     for name in names:
         if name.startswith(_NATIVE_CONSTRAINT_PREFIXES):
             continue
@@ -240,6 +245,33 @@ def build_applied_constraints(network: pypsa.Network) -> list[dict[str, Any]]:
         out.append(
             {"name": name, "source": source, "shadowPrice": _linopy_dual(network, name)}
         )
+    return out
+
+
+def _native_applied_constraints(network: pypsa.Network) -> list[dict[str, Any]]:
+    """Custom / DSL constraints written as native GlobalConstraint rows, with their ``mu``."""
+    try:
+        gc = network.global_constraints
+    except Exception:
+        return []
+    if gc is None or gc.empty:
+        return []
+    out: list[dict[str, Any]] = []
+    for name in gc.index:
+        text = str(name)
+        if text.startswith("cc_"):
+            source = "custom"
+        elif text.startswith(("dsl_", "spec_")):
+            source = "dsl"
+        else:
+            continue
+        mu = 0.0
+        if "mu" in gc.columns:
+            try:
+                mu = float(gc.at[name, "mu"])
+            except (TypeError, ValueError):
+                mu = 0.0
+        out.append({"name": text, "source": source, "shadowPrice": mu if mu == mu else 0.0, "native": True})
     return out
 
 

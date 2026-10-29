@@ -311,11 +311,11 @@ def test_start_up_time_bounds_the_start_snapshot_with_the_native_constraint() ->
 # ── 4. H2 co-firing derate: no citable source, so a documented zero ──────────────────────────────────────────
 
 
-def test_h2_derate_is_a_documented_zero_placeholder() -> None:
+def test_h2_derate_is_a_documented_zero_assumption() -> None:
     cat = tech.catalogue()
     for key in ("h2_derate_efficiency_per_share", "h2_derate_capacity_per_share"):
         p = cat["fuels"][key]
-        assert p["value"] == 0.0 and p["verified"] == "assumption" and "no citable source" in p["note"].lower()
+        assert p["value"] == 0.0 and p["verified"] == "assumption" and "2026-10-29" in p["source"]["locator"]
     _, built = _plant([58.0], {"h2Share": 0.3, "h2ShareUnit": "vol", "h2Price": 100.0}, "cofiring_simple")
     assert built["registry"]["derate"]["applied"] is False
 
@@ -323,7 +323,7 @@ def test_h2_derate_is_a_documented_zero_placeholder() -> None:
 def test_defaults_do_not_change_an_existing_plant() -> None:
     """A CCGT / cofiring plant with none of the new keys carries exactly the legacy rows (no new sheet, no new column)."""
     _, ccgt = add_plant(grid(), "ccgt", {"pNom": 400, "committable": True})
-    assert set(ccgt["fragment"]["sheets"]) == {"buses", "carriers", "generators", "links", "RAGNAROK_TimeUnits", "RAGNAROK_PLANTS"}
+    assert set(ccgt["fragment"]["sheets"]) == {"buses", "carriers", "generators", "links", "RAGNAROK_TimeUnits", "RAGNAROK_PLANTS", "RAGNAROK_Composites"}
     link = ccgt["fragment"]["sheets"]["links"][0]
     assert link["p_min_pu"] == 0.4 and link["start_up_cost"] == 24000.0 and link["efficiency"] == 0.58 and "stand_by_cost" not in link
     assert {r["attribute"] for r in ccgt["fragment"]["sheets"]["RAGNAROK_TimeUnits"]} == {"min_up_time", "min_down_time", "up_time_before", "ramp_limit_up", "ramp_limit_down"}
@@ -358,6 +358,8 @@ def test_plant_results_report_the_start_tier_and_its_cost() -> None:
         assert_allclose(sc_out["nativeStartUpCost"], 60.0 * P_EL, rtol=RTOL)
         assert_allclose(sc_out["tierIncrement"], (per_mw - 60.0) * P_EL, atol=1e-9)
         assert_allclose(out["commitmentCost"], per_mw * P_EL, rtol=RTOL)
+        assert "cofiring" not in out                                   # a plain turbine has no blend: the UI shows a dash, not "H2 0 %; avoided 0 t"
+        assert out["emissions"]["avoidedT"] == 0.0
 
 
 def test_plant_results_report_the_stand_by_cost_of_the_generator_route() -> None:

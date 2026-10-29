@@ -33,6 +33,7 @@ no ``extra_functionality`` hook (modelling-to-generate-alternatives, strategic b
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -40,7 +41,14 @@ import pandas as pd
 import pypsa
 import xarray as xr
 
-from .config import PLAN_KEY, CarbonPriceConfig, early_snapshots, from_meta, price_series
+from ..emissions import carrier_emission_factors
+from .config import (
+    PLAN_KEY,
+    CarbonPriceConfig,
+    early_snapshots,
+    from_meta,
+    price_series,
+)
 
 _MIN_EFFICIENCY = 1e-6
 
@@ -68,21 +76,21 @@ def _first_scenario(frame: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series
     return frame
 
 
-def _carrier_factor(network: pypsa.Network) -> pd.Series:
-    """tCO2/MWh of fuel per carrier name (empty when no carrier states one)."""
-    carriers = network.carriers
-    if "co2_emissions" not in carriers.columns or carriers.empty:
-        return pd.Series(dtype=float)
-    ef = pd.to_numeric(_first_scenario(carriers)["co2_emissions"], errors="coerce").fillna(0.0)
-    return ef.astype(float)
+def emission_factors(
+    network: pypsa.Network,
+    carrier_factors: Mapping[str, Any] | None = None,
+) -> pd.Series:
+    """``co2_emissions`` of each generator's carrier (tCO2/MWh of fuel), indexed by generator name.
 
-
-def emission_factors(network: pypsa.Network) -> pd.Series:
-    """``co2_emissions`` of each generator's carrier (tCO2/MWh of fuel), indexed by generator name."""
+    The carrier factors come from the one shared source, :func:`backend.app.emissions.carrier_emission_factors`
+    (the map a run also puts on ``RunContext.emissions_factors``); pass that map as ``carrier_factors`` when it is
+    at hand, otherwise it is read from ``network`` with the same function. A blank or non-numeric factor counts as 0.
+    """
     gens = _first_scenario(network.generators)
     if gens.empty:
         return pd.Series(dtype=float)
-    ef = _carrier_factor(network)
+    raw = carrier_emission_factors(network) if carrier_factors is None else carrier_factors
+    ef = pd.to_numeric(pd.Series(raw, dtype=object), errors="coerce").fillna(0.0).astype(float)
     return gens["carrier"].map(lambda c: float(ef.get(str(c), 0.0))).astype(float)
 
 
@@ -92,11 +100,17 @@ def _column_names(columns: pd.Index) -> list[str]:
 
 # ── the coefficient: currency per MWh of electricity ──────────────────────────────
 
-def adder_frame(network: pypsa.Network, config: CarbonPriceConfig | None = None) -> pd.DataFrame:
+def adder_frame(
+    network: pypsa.Network,
+    config: CarbonPriceConfig | None = None,
+    *,
+    carrier_factors: Mapping[str, Any] | None = None,
+) -> pd.DataFrame:
     """Carbon cost per MWh of generator output, ``price_t * co2_emissions / eta_t`` (currency/MWh).
 
     Rows are ``network.snapshots``; columns the emitting generators (``(scenario, name)`` pairs of a
-    stochastic network). An empty frame when nothing is priced.
+    stochastic network). An empty frame when nothing is priced. ``carrier_factors`` is the shared carrier
+    map (``RunContext.emissions_factors``); without it the same map is read from ``network``.
     """
     cfg = config if config is not None else plan_of(network)
     empty = pd.DataFrame(index=network.snapshots, dtype=float)
@@ -105,7 +119,7 @@ def adder_frame(network: pypsa.Network, config: CarbonPriceConfig | None = None)
     series = price_series(cfg, network.snapshots)
     if (series <= 0).all():
         return empty
-    ef_by_name = emission_factors(network)
+    ef_by_name = emission_factors(network, carrier_factors)
     eta = network.get_switchable_as_dense("Generator", "efficiency")
     names = _column_names(eta.columns)
     ef_col = np.array([float(ef_by_name.get(n, 0.0)) for n in names])
@@ -154,11 +168,18 @@ def _expression(p: Any, coef: pd.DataFrame) -> Any:
     return (p.sel(name=names) * da).sum(["name", "snapshot"])
 
 
-def extra_functionality(n: pypsa.Network, snapshots: Any = None) -> None:
+def extra_functionality(
+    n: pypsa.Network,
+    snapshots: Any = None,
+    *,
+    carrier_factors: Mapping[str, Any] | None = None,
+) -> None:
     """Add the carbon-price term to ``n.model``'s objective (a PyPSA ``extra_functionality`` hook).
 
     A no-op when the network carries no price. Call it once per model (PyPSA does, from
-    ``extra_functionality``): a second call would add the term twice.
+    ``extra_functionality``): a second call would add the term twice. ``carrier_factors`` is the run's
+    shared carrier map (``RunContext.emissions_factors``, from
+    :func:`backend.app.emissions.carrier_emission_factors`); without it the same function reads ``n``.
     """
     cfg = plan_of(n)
     if cfg is None or not cfg.is_active:
@@ -168,7 +189,7 @@ def extra_functionality(n: pypsa.Network, snapshots: Any = None) -> None:
         return
     p = m["Generator-p"]
     idx = p.indexes["snapshot"]
-    adder = adder_frame(n, cfg)
+    adder = adder_frame(n, cfg, carrier_factors=carrier_factors)
     if adder.empty:
         return
     weight = objective_weights(n, idx, multi_invest=bool(getattr(n, "_multi_invest", False)))

@@ -22,6 +22,7 @@ from typing import Any
 
 from mcp.types import ToolAnnotations
 
+from .catalogue import declare_areas
 from .server import _needs_confirm, _preview, _RO, get_client, mcp
 
 _MAX_VALUES = 2000  # inline hourly values returned at most; stats always cover the full window
@@ -106,3 +107,11 @@ async def import_demand_db(
         "country_iso": resp.get("country_iso"),
         "preview": resp.get("preview"),
     }
+
+
+# Tool areas (see catalogue.py).
+declare_areas({
+    "list_demand_db": "data",
+    "get_demand_db_slice": "data",
+    "import_demand_db": "data",
+})
