@@ -14,11 +14,11 @@ from .server import _RO, mcp
 @mcp.tool(
     annotations=_RO,
     description=(
-        "Find the right Ragnarok tool for a task. Call it when unsure which tool to use. No area: the areas "
-        "(inspect, build, composites, time_ops, transforms, run, results, studies, policy, physical_risk, siting, "
-        "data, session) with purpose, tool count and entry-point tools. With area: that area's tools, one line each "
+        "Find the right Ragnarok tool for a task (도구 찾기). Call it when unsure which tool to use. No area: the areas "
+        f"({', '.join(AREAS)}) with purpose, tool count and entry-point tools. With area: that area's tools, one line each "
         "(read-only vs writes / needs confirm=true) plus ready-made recipes of ordered calls, e.g. add a CCGT or "
-        "battery and solve, hydrogen cost, ramp rates and time step, carbon price, clustering, import a country."
+        "battery and solve, hydrogen cost, fuel price series, ramp rates and time step, carbon price, adequacy study, "
+        "clustering, import a country."
     ),
 )
 async def tool_catalogue(area: str | None = None) -> str:

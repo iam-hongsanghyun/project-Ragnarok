@@ -165,8 +165,51 @@ async def get_run_analysis(
     )
 
 
+_TOTALS_GROUPS = ("generators", "buses", "processes")
+_TOTALS_CAP = 50
+
+
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "Weighted per-asset totals of a stored run, read from PyPSA's own n.statistics under the run's snapshot weightings (so a sampled or clustered run is weighted correctly): "
+        "group 'generators' = per generator energyMwh, operatingCost (marginal cost plus the carbon term), carbonCost, emissionsTco2, curtailmentMwh; 'buses' = loadMwh, generationMwh, averagePrice (load-weighted), carrierMwh; "
+        "'processes' = throughputMwh, operatingCost. Also modeledHours (sum of the weights). sort_by names a field to rank by (descending); only the top `limit` assets (default 50) are returned, "
+        "with a truncation notice that says how many were left out. The per-snapshot weights are omitted unless include_weights=true. period picks a pathway investment period."
+    ),
+)
+async def get_run_totals(
+    run_name: str, group: str = "generators", sort_by: str | None = None, limit: int = _TOTALS_CAP,
+    period: int | None = None, include_weights: bool = False,
+) -> Any:
+    from urllib.parse import quote
+
+    if group not in _TOTALS_GROUPS:
+        return {"error": f'unknown group "{group}"; valid: {", ".join(_TOTALS_GROUPS)}.'}
+    res = await get_client()._get(f"/api/runs/{quote(run_name, safe='')}/derived", {"period": period})
+    assets: dict[str, dict[str, Any]] = res.get(group) or {}
+    fields = sorted({k for v in assets.values() for k, x in v.items() if isinstance(x, (int, float))})
+    if sort_by is not None and sort_by not in fields:
+        return {"error": f'unknown sort_by "{sort_by}" for {group}; valid: {", ".join(fields) or "none (no assets)"}.'}
+    key = sort_by or (fields[0] if fields else None)
+    names = sorted(assets, key=(lambda n: -float(assets[n].get(key) or 0.0)) if key else None)  # type: ignore[arg-type]
+    shown = names[: max(1, int(limit))]
+    out: dict[str, Any] = {
+        "run": res.get("run", run_name), "period": res.get("period"), "group": group, "modeledHours": res.get("modeledHours"),
+        "sortedBy": key, "total": len(names), "returned": len(shown), "items": {n: assets[n] for n in shown},
+    }
+    if len(shown) < len(names):
+        out["truncated"] = f"Showing the top {len(shown)} of {len(names)} {group} by {key}; raise limit or pick another group."
+    if include_weights:
+        out["weights"] = res.get("weights")
+    else:
+        out["weightsHint"] = f"Per-snapshot weights ({len(res.get('weights') or [])} values) omitted; call with include_weights=true to get them."
+    return out
+
+
 # Tool areas (see catalogue.py).
 declare_areas({
+    "get_run_totals": "results",
     "compare_run_statistics": "results",
     "get_metric_options": "results",
     "get_period_results": "results",

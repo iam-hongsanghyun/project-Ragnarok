@@ -81,7 +81,7 @@ def test_tool_catalogue_overview_and_area() -> None:
     overview = asyncio.run(tools_catalogue.tool_catalogue())
     for area in AREAS:
         assert f"- {area} (" in overview
-    assert len(overview) < 4500
+    assert len(overview) < 5500
     comp = asyncio.run(tools_catalogue.tool_catalogue("composites"))
     assert (
         "add_plant" in comp and "[W+confirm]" in comp and "[R] list_plant_types" in comp
@@ -91,7 +91,7 @@ def test_tool_catalogue_overview_and_area() -> None:
 
 def test_tool_catalogue_unknown_area_is_an_actionable_sentence() -> None:
     out = asyncio.run(tools_catalogue.tool_catalogue("power"))
-    assert out.startswith('error: unknown area "power"; valid: inspect, build')
+    assert out.startswith('error: unknown area "power"; valid: inspect, data')
 
 
 def test_tool_catalogue_output_ceiling() -> None:

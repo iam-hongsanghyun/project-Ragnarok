@@ -21,6 +21,8 @@ Write (gated like ``forge_query``: without ``confirm=true`` they return a real d
 * ``revert_adjustments`` - restore the originals from that baseline.
 * ``add_conversion``     - add a conversion technology (Link + carrier bus + carriers + fuel supply).
 * ``merge_fragment``     - merge an importer / siting / PyPSA-Earth fragment into the working model.
+* ``fill_discount_rate`` - write discount_rate into every row with an overnight_cost (Forge, Settings -> Discount rate).
+* ``clean_placeholder_bounds`` - blank 1e9+ placeholder bounds so the row takes PyPSA's inf (Forge fix the model check points to).
 """
 
 from __future__ import annotations
@@ -231,8 +233,56 @@ async def merge_fragment(fragment: dict[str, Any], confirm: bool = False) -> Any
     return _gated_preview(res) if gated else res
 
 
+def _forge_gate(preview: dict[str, Any], effect: str, confirm: bool) -> dict[str, Any] | None:
+    """The gated preview for a Forge fix (the server's own count-only dry run), or ``None`` when it should be applied."""
+    if _needs_confirm(cheap=False) and not confirm:
+        return _gated_preview({"effect": effect, "wouldChange": preview})
+    return None
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Write the project discount rate (할인율, fraction per year, 0.05 = 5 %) into the discount_rate column of every row that has an overnight_cost, so PyPSA annuitises each cost with it "
+        "(Forge, the Settings -> Discount rate action). overwrite=true also replaces a discount_rate a row already carries. Without confirm=true it returns the preview (the sheets it would rewrite, with row counts); "
+        "re-call with confirm=true to write. Run it once after importing a model whose costs are overnight."
+    ),
+)
+async def fill_discount_rate(discount_rate: float, overwrite: bool = False, confirm: bool = False) -> Any:
+    client = get_client()
+    body = {"sessionId": client.session_id, "discountRate": discount_rate, "overwrite": overwrite}
+    preview = await client._post("/api/forge/fill-discount-rate", {**body, "apply": False})
+    gated = _forge_gate(preview, f"Write discount_rate={discount_rate:g} into every row with an overnight_cost.", confirm)
+    if gated is not None:
+        return gated
+    if not preview.get("sheets"):
+        return {**preview, "status": "nothing to change"}
+    return await client._post("/api/forge/fill-discount-rate", {**body, "apply": True})
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Blank every finite placeholder bound of 1e9 or more (1e12 standing for 'no limit') so the row takes PyPSA's inf default (Forge fix; check_model flags these). "
+        "Without confirm=true it returns the preview (the sheets it would rewrite with row counts, and the cells it would clear); re-call with confirm=true to write."
+    ),
+)
+async def clean_placeholder_bounds(confirm: bool = False) -> Any:
+    client = get_client()
+    body = {"sessionId": client.session_id}
+    preview = await client._post("/api/forge/clean-placeholder-bounds", {**body, "apply": False})
+    gated = _forge_gate(preview, "Clear 1e9+ placeholder bounds in the working model.", confirm)
+    if gated is not None:
+        return gated
+    if not preview.get("sheets"):
+        return {**preview, "status": "nothing to change"}
+    return await client._post("/api/forge/clean-placeholder-bounds", {**body, "apply": True})
+
+
 # Tool areas (see catalogue.py).
 declare_areas({
+    "fill_discount_rate": "build",
+    "clean_placeholder_bounds": "build",
     "compare_runs": "results",
     "get_kpis": "results",
     "compare_companies": "results",

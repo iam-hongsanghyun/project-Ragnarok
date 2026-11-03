@@ -885,6 +885,7 @@ Rules (kept in the module docstring of `module_hooks.py`): order comes from the 
 result key is an error at declaration; every declared `payload_keys` entry is present in the payload (`None` when the study did not run); a module sees only
 `RunContext`. `module_hooks.registered()` returns the declared surface as data; `test_module_hooks.py` pins its hash (a change is a deliberate edit), enforces the
 core-to-module import allowlist in both directions (a stale row fails), and fails any production import of a compatibility shim.
+A module is also an MCP surface: `test_mcp_coverage.py` fails when a `backend/app/<module>/hooks.py` has no `MODULES` entry (the tools that write its inputs and read its preview / results), when a `study` hook's payload key is not in `backend/mcp/tools_studies.py` (`describe_studies` / `get_study_result`), when a registered run option is missing from `describe_run_options`, or when a new `/api` route is reached by no tool.
 
 | Module package | Contents | Note |
 |---|---|---|
@@ -923,6 +924,12 @@ provably the same constraint; the kinds PyPSA has no type for (intensity, shares
 that snapshot, the unit keeps the workbook's marginal cost there and the notes say so); the carriers column `fuel_cost_thermal` (written by the fuel-price importer) acts as a
 constant series for a carrier with no column in the sheet; `RAGNAROK_VariableOM` (static rows `component` Generator | Link, `name` or `carrier`, `vom` in currency/MWh of electric
 output; a name row beats a carrier row; no row = 0 and the notes list the units).
+
+**Editing the inputs** (`backend/app/fuel_costs/edit.py`, routes in `routers/fuel_costs.py`; MCP `get_fuel_inputs`, `set_fuel_price`, `set_vom`, `set_fuel_price_scenario`). `GET /api/fuel-costs/inputs` reads what the module will
+see; `POST /api/fuel-costs/{price,vom,scenario-price}/{set,remove}` write one input each and re-read the result with `read_price_sheet` / `read_vom` / `read_price_scenarios`, so a row a run would refuse is a 400 here with the valid
+choices. A constant goes to `carriers.fuel_cost_thermal`, a series to a column of `RAGNAROK_FuelPrices` (stored through `merge_series_sheets`, snapshots must be on the model's axis and take the `snapshots` sheet's spelling);
+a constant for a carrier that already has a series is refused (the series would win silently). `unit` converts from the fuel's native unit with the fuel-price importer's factors (`importers/databases/fuel_prices`: gas MMBtu,
+coal / biomass tonne, oil bbl) to currency/MWh_thermal. Unknown carriers, units and component names are 400s that list the valid ones.
 
 **Run-time rule** (`build_step` hook `fuel-costs`, order 20; switch `options.fuelCosts.enabled`, default on only when the model has a price sheet, a VOM sheet or a carrier
 `fuel_cost_thermal`, so a model with none is untouched):

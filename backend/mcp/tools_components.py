@@ -220,7 +220,7 @@ async def pypsa_io_capabilities() -> Any:
 declare_areas({
     "apply_seasonal_rating": "build",
     "set_maintenance": "time_ops",
-    "import_pypsa_native": "data",
-    "export_pypsa_native": "data",
-    "pypsa_io_capabilities": "data",
+    "import_pypsa_native": "files",
+    "export_pypsa_native": "files",
+    "pypsa_io_capabilities": "files",
 })

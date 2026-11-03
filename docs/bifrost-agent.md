@@ -131,15 +131,17 @@ replace), carriers and snapshots are unioned, temporal sheets are widened.
 `submit_solve` reports the run **its own** queue job stored (the queue item's
 `runName`), not the newest run in History.
 
-Not wrapped, on purpose: the SSE stream (`/api/events`), the removed direct
-`/api/run` (the queue replaced it: `submit_solve` and `get_queue`), async export jobs (`/api/exports`, covered
-by `export_run`), the country GeoJSON and `DELETE /api/log`.
+Not wrapped, on purpose: eleven operations an agent cannot use (the SSE stream, the async export jobs, the country GeoJSON, the whole-run bundle,
+purging the journal, UI-only acknowledgements). They are listed with their reasons in `EXCLUDED` of `backend/tests/test_mcp_coverage.py`, which
+fails when any other `/api` operation is not reached by a tool (static resolution of every client call, plus a recording run of the tools whose path
+takes a format argument), when a run option is missing from `describe_run_options`, when a backend module with `hooks.py` has no entry in its
+`MODULES` table, or when a study hook's payload key is not readable through `get_study_result`.
 
 **Confirmation-gated tools** (never auto-run): `submit_solve` (minutes of compute), `import_dataset`/`one_click_model` (live network, rate limits), any `edit_sheet`/`delete` that overwrites user data, and anything spending money (paid APIs). The UI shows a diff/preview and an Approve button; an "autonomy level" setting can pre-authorise the cheap tiers.
 
 ### 2.7 MCP-only modelling and scenario tools
 
-The MCP server has 206 tools: 117 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 89 in
+The MCP server has 220 tools: those in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and those in
 `backend/mcp/tools_*.py`. The table below covers the 38 added before 2026-10-28; `compare_run_statistics` (tools_results_extra.py, read-only, `GET /api/results/compare?topics=statistics`) compares runs through `pypsa.NetworkCollection` statistics, and `get_metric_options` (same module, read-only, `GET /api/runs/{name}/metrics`), `get_period_results` (same module, read-only, `GET /api/runs/{name}/period/{period}`) and `get_run_analysis` (same module, read-only, `GET /api/runs/{name}/analysis/{topic}`) are listed in the last table below. The GUI reaches the same backend routes through its own
 controls (Forge, the Solver section, the Scenarios panel). This table is a snapshot from 2026-10-28, read from the
 code: the tool name and module from the `@mcp.tool` decorator, the endpoints from the `RagnarokClient` method each
@@ -245,6 +247,27 @@ MCP `list_tools` call returns the full descriptions, and `describe_run_options` 
 | `list_plant_types`, `get_plant_results` | — | Plant types and defaults; per-plant generation, CF, starts, H2 share and CO2 avoided |
 | `add_plant`, `edit_plant`, `remove_plant` | confirm | Add, re-derive or remove a whole plant (Generator, BESS, CCGT/OCGT, co-firing, P2X chain) |
 
+**Fuel costs, annual budgets and the other policy modules (`tools_policy_modules.py`)** — inputs are the model's own sheets; see [backend.md](backend.md) for the formulation.
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `get_fuel_inputs` | `GET /api/fuel-costs/inputs` | — | What the fuel-costs module reads: price per carrier (series statistics or flat), VOM rows, scenario price rows, native units |
+| `set_fuel_price` | `POST /api/fuel-costs/price/set` \| `/price/remove` | cheap | A carrier's price as a constant (`carriers.fuel_cost_thermal`) or a series (`RAGNAROK_FuelPrices` column), optionally in the fuel's native unit; `remove=true` drops it |
+| `set_vom` | `POST /api/fuel-costs/vom/set` \| `/vom/remove` | cheap | One `RAGNAROK_VariableOM` row (a unit by name, or a carrier), currency/MWh_el |
+| `set_fuel_price_scenario` | `POST /api/fuel-costs/scenario-price/set` \| `/scenario-price/remove` | cheap | One `RAGNAROK_FuelPriceScenarios` row (scenario, carrier, snapshot, price \| multiplier) |
+| `get_annual_budgets(run_name)` | `GET /api/annual-budgets`; `GET /api/runs/{name}/annual-budgets` | — | The budget rows and horizon values; with `run_name`, what a stored run applied against what it achieved |
+
+**Studies and coverage gaps (`tools_studies.py`, `tools_results_extra.py`, `tools_plants.py`, `tools_p2x.py`, `tools_analysis.py`)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `describe_studies`, `get_study_result` | `GET /api/runs/{name}/analytics`, `/period/{period}?fields=` | — | The index of module studies (option key, result key, how to enable) and one study's result of a stored run, long lists capped |
+| `get_run_totals` | `GET /api/runs/{name}/derived` | — | PyPSA-weighted per-asset totals (energy, operating and carbon cost, emissions, curtailment; bus load and price), top-N with a truncation notice |
+| `list_plants` | `GET /api/build/plants` | — | The plants in the model (id, type, bus, capacity, component count) |
+| `get_p2x_chain_defaults`, `get_rfnbo_config`, `check_rfnbo` | `GET /api/p2x/chain/defaults`, `GET /api/p2x/rfnbo/config`, `POST /api/p2x/rfnbo/checks` | — | Chain-designer defaults; stored RFNBO settings; pre-solve additionality / geographic checks |
+| `set_rfnbo_config` | `PUT /api/p2x/rfnbo/config` | cheap | Store the session's RFNBO settings (what a run without `options.rfnboConfig` uses) |
+| `fill_discount_rate`, `clean_placeholder_bounds` | `POST /api/forge/fill-discount-rate`, `/clean-placeholder-bounds` | confirm | The Forge fixes `check_model` points to; the server's own count-only dry run is the preview |
+
 **Operations and temporal modules (`tools_operations_modules.py`)** — PyPSA counts ramps, UC times and rolling windows per snapshot; these tools keep the user's hours and per-hour rates visible and write the per-snapshot values at solve time with the run's weights. See [backend.md](backend.md) §5.13.
 
 | Tool | Gate | What it does |
@@ -261,25 +284,29 @@ Every tool carries one area tag, declared next to the tool with `declare_areas({
 
 <!-- tool-catalogue:start (generated by scripts/gen_mcp_catalogue_doc.py; do not edit by hand) -->
 
-The server has 206 tools in 13 areas (mode: R read-only, W+confirm preview then confirm=true, W writes without confirm).
+The server has 220 tools in 17 areas (mode: R read-only, W+confirm preview then confirm=true, W writes without confirm).
 
 | Area | Tools | Start with |
 |---|---|---|
 | `inspect` | 12 | `get_world_state`, `check_model`, `get_sheet_page` |
-| `build` | 19 | `add_generator`, `edit_sheet`, `forge_query`, `add_component` |
-| `composites` | 17 | `list_plant_types`, `add_plant`, `place_composite`, `build_p2x_chain`, `get_plant_results` |
+| `data` | 24 | `list_starter_packs`, `build_starter_pack`, `import_dataset`, `one_click_model` |
+| `files` | 14 | `export_workbook`, `import_project`, `export_model`, `load_example` |
+| `build` | 21 | `add_generator`, `edit_sheet`, `forge_query`, `add_component` |
+| `composites` | 14 | `list_plants`, `list_plant_types`, `add_plant`, `place_composite`, `get_plant_results` |
+| `p2x` | 8 | `list_p2x_technologies`, `preview_p2x_chain`, `build_p2x_chain`, `get_p2x_results` |
 | `time_ops` | 9 | `get_time_units`, `set_time_units`, `retarget_snapshots` |
 | `transforms` | 11 | `cluster_network`, `temporal_cluster`, `slice_model`, `sample_workbook` |
+| `fuel_costs` | 5 | `get_fuel_inputs`, `set_fuel_price`, `set_vom`, `get_fuel_costs` |
+| `policy` | 9 | `set_carbon_price`, `set_annual_budget`, `set_custom_dsl`, `apply_demand_response` |
 | `run` | 21 | `submit_solve`, `get_queue`, `describe_run_options`, `submit_scenario` |
-| `results` | 16 | `list_runs`, `get_kpis`, `get_analytics`, `get_report` |
-| `studies` | 2 | `describe_analytics`, `optimize_procurement` |
-| `policy` | 10 | `set_carbon_price`, `set_annual_budget`, `set_custom_dsl`, `apply_demand_response` |
+| `results` | 17 | `list_runs`, `get_kpis`, `get_analytics`, `get_report` |
+| `studies` | 4 | `describe_studies`, `get_study_result`, `describe_analytics`, `optimize_procurement` |
 | `physical_risk` | 9 | `physical_risk_seed`, `physical_risk_run`, `physical_risk_report` |
 | `siting` | 15 | `siting_scan`, `upload_siting_dataset`, `siting_portfolio_metrics` |
-| `data` | 38 | `list_starter_packs`, `build_starter_pack`, `import_dataset`, `export_model` |
-| `session` | 27 | `get_journal`, `undo_journal_entry`, `list_plugins`, `get_server_info` |
+| `plugins` | 18 | `list_plugins`, `get_plugin`, `run_plugin_analysis`, `list_tab_modules` |
+| `session` | 9 | `tool_catalogue`, `get_journal`, `undo_journal_entry`, `get_server_info` |
 
-**`inspect`** - Inspect the model. Read what is loaded: sheets, component schema, series windows, validity checks. Never changes anything.
+**`inspect`** - Inspect the model. Read what is loaded: sheets, component schema, series windows, validity and grid-topology checks. Never changes anything.
 
 | Tool | Mode | What it does |
 |---|---|---|
@@ -300,8 +327,74 @@ Recipes:
 
 - what is loaded and is it right: get_world_state -> check_model -> validate_model
 - look inside a sheet: get_sheet_stats -> get_sheet_page -> derive_series
+- check the grid structure before a solve: consistency_check -> network_analysis -> validate_model
 
-**`build`** - Build and edit components. Add or change buses, generators, loads, lines, storage and any PyPSA component; bulk edits; piecewise cost curves.
+**`data`** - Data import. Bring data in: country models and starter packs, importer datasets, the demand database, weather-derived profiles, PyPSA-Earth builds, importer API keys.
+
+| Tool | Mode | What it does |
+|---|---|---|
+| `attach_hydro_inflow` | W+confirm | Fetch GloFAS river-discharge-shaped inflow (keyless Open-Meteo Flood API) for the model's hydro storage units and attach it as storage_unit… |
+| `attach_renewable_profiles` | W+confirm | Fetch weather-derived capacity-factor profiles for the model's existing solar/wind fleet and attach them, aligning the snapshot axis to the… |
+| `build_starter_pack` | W+confirm | Assemble a runnable workbook for a country + year from its starter-pack recipe and load it |
+| `delete_import_secret` | W+confirm | Remove a stored importer API key |
+| `get_demand_db_slice` | R | Hourly load of one series from the self-hosted demand database for year_from..year_to (UTC years, max 12) |
+| `get_import_provenance` | R | Recent data imports from the persistent provenance log (source, dataset, country, filters, time), newest first |
+| `import_dataset` | W+confirm | Import one source's datasets for a country and merge them into the working model |
+| `import_demand_db` | W+confirm | Import one series from the self-hosted demand database into the working model: a national bus, a Load and an hourly loads-p_set series over… |
+| `list_demand_db` | R | What the self-hosted hourly demand database holds: per series (key 'source/area', e.g. 'opsd/DE', 'eia930/ERCO') the country, years, covera… |
+| `list_import_countries` | R | The country index importers accept (ISO codes and names) |
+| `list_import_databases` | R | The flat dataset registry: one entry per importable dataset across every source (id, source, kind, filters) |
+| `list_import_secrets` | R | Names of the API keys the backend holds for importers (stored on the server or set in its environment) |
+| `list_importers` | R | List the data-import sources Ragnarok knows, with their per-country datasets and filters |
+| `list_starter_packs` | R | Country starter-pack recipes (country → years) that build_starter_pack can assemble |
+| `merge_fragment` | W+confirm | Merge a WorkbookFragment (from import_dataset, siting_scan or PyPSA-Earth) into the working model with the GUI's 'Add to workbook' rules: r… |
+| `one_click_model` | W+confirm | One-click: import a country's power plants, network and demand: assemble a runnable model for a country from keyless global sources (OSM ne… |
+| `pypsa_earth_apply` | W+confirm | Load a finished PyPSA-Earth build into Ragnarok |
+| `pypsa_earth_build` | W+confirm | Start a PyPSA-Earth build for a country (country_iso like 'KR'): runs the snakemake workflow in the background (can take hours, downloads d… |
+| `pypsa_earth_build_status` | R | Status of one PyPSA-Earth build job (queued / running / done / error / stopped, phase, detail) |
+| `pypsa_earth_configure` | W+confirm | Point Ragnarok at a pypsa-earth checkout on the server (must contain a Snakefile) |
+| `pypsa_earth_status` | R | PyPSA-Earth: whether the workflow is set up on the server (and where), suggested checkout dirs, and every build job this backend knows about |
+| `pypsa_earth_stop` | W+confirm | Stop a running PyPSA-Earth build |
+| `set_import_secret` | W+confirm | Store an importer API key on the backend (e.g. name='entsoe_token') |
+| `source_health` | R | Which upstream data sources are reachable right now |
+
+Recipes:
+
+- a runnable model for a country: list_starter_packs -> build_starter_pack -> build_starter_pack(confirm=true) -> check_model
+- build a model from data, check it and solve: list_starter_packs -> build_starter_pack(confirm=true) -> check_model -> validate_model -> submit_solve(confirm=true) -> get_kpis
+- pick datasets for a country yourself: list_importers -> list_import_databases -> import_dataset -> import_dataset(confirm=true)
+- add weather-based solar and wind profiles to the fleet: attach_renewable_profiles -> attach_renewable_profiles(confirm=true) -> check_model
+- take demand from the demand database: list_demand_db -> get_demand_db_slice -> import_demand_db(confirm=true)
+- build a country grid with PyPSA-Earth: pypsa_earth_status -> pypsa_earth_build(confirm=true) -> pypsa_earth_build_status -> pypsa_earth_apply(confirm=true)
+
+**`files`** - Files, projects and examples. Save and load the model as a workbook, project zip, PyPSA netCDF / HDF5 / Excel / CSV or a MATPOWER / pandapower case; export a stored run; the multi-year master model; bundled examples.
+
+| Tool | Mode | What it does |
+|---|---|---|
+| `clear_master` | W+confirm | Remove the stored master model (the working model is untouched) |
+| `export_model` | W | Export the CURRENT working model to a file: format ∈ netcdf \| hdf5 \| project |
+| `export_pypsa_native` | W | Export the CURRENT working model as a PyPSA-native Excel workbook (kind='excel', Network.export_to_excel) or a zip of a PyPSA CSV folder (k… |
+| `export_run` | W | Export a STORED run to a file on disk |
+| `export_workbook` | W | Save / export the CURRENT working model to an Excel workbook (.xlsx), input-only  |
+| `get_master_meta` | R | Metadata for the multi-year MASTER model stored in this session (its sheets and the calendar 'years' it spans), or {} if none is stored |
+| `import_master` | W+confirm | Store a multi-year project (.zip/.xlsx on disk) as the MASTER model  |
+| `import_network` | W+confirm | Import a PyPSA-native netCDF (.nc) or HDF5 (.h5) file from disk INTO the working model (format inferred from the extension) |
+| `import_project` | W+confirm | Import a Ragnarok Project .zip (or workbook .xlsx) from disk |
+| `import_pypsa_native` | W+confirm | Import a PyPSA-native or grid-model file INTO the working model through PyPSA's own importers |
+| `import_result` | W+confirm | Import a RESULT-bearing file from disk as a new History run (model + results): a Ragnarok project .zip, or a bare results .xlsx from anothe… |
+| `list_examples` | R | List the bundled example models (id, label, description) |
+| `load_example` | W+confirm | Load an example model (sample network) as the working model (replaces the current model) |
+| `pypsa_io_capabilities` | R | Which PyPSA-native import/export paths the backend offers, the netCDF export option keys, and the state of the isolated pandapower environm… |
+
+Recipes:
+
+- save the model to a file: export_workbook -> export_model
+- open a PyPSA or grid-model file: pypsa_io_capabilities -> import_pypsa_native -> import_pypsa_native(confirm=true) -> check_model
+- export a stored run for someone else: list_runs -> export_run
+- start from a bundled example: list_examples -> load_example -> load_example(confirm=true) -> check_model
+- keep a multi-year master and work on one year: import_master(confirm=true) -> get_master_meta -> derive_from_master -> derive_from_master(confirm=true)
+
+**`build`** - Build and edit components. Add or change buses, generators, loads, lines, storage and any PyPSA component; bulk edits; piecewise cost curves; Forge fixes (discount rate, placeholder bounds).
 
 | Tool | Mode | What it does |
 |---|---|---|
@@ -314,9 +407,11 @@ Recipes:
 | `adjust_carrier_capacity` | W+confirm | Increase or decrease the total installed capacity of a carrier (e.g. all gas, wind or solar generators) to a target (MW), distributed acros… |
 | `adjust_values` | W+confirm | Increase, decrease or set values in bulk, e.g. scale all gas generator capacity or costs by a percentage (Forge bulk adjust): 'adjustments'… |
 | `apply_seasonal_rating` | W+confirm | Write per-snapshot line limits (lines-s_max_pu) from summer/winter MVA ratings, via PyPSA's Lines.apply_seasonal_rating |
+| `clean_placeholder_bounds` | W+confirm | Blank every finite placeholder bound of 1e9 or more (1e12 standing for 'no limit') so the row takes PyPSA's inf default (Forge fix |
 | `clear_piecewise_curve` | W+confirm | Remove the piecewise curve of one component (the scalar cost / efficiency applies again) |
 | `describe_piecewise` | R | Reference for piecewise-linear cost / efficiency curves (PyPSA 1.3+): which component attributes accept a curve (marginal_cost on Generator… |
 | `edit_sheet` | W+confirm | Edit a sheet in the working session |
+| `fill_discount_rate` | W+confirm | Write the project discount rate (할인율, fraction per year, 0.05 = 5 %) into the discount_rate column of every row that has an overnight_cost,… |
 | `forge_query` | W+confirm | Bulk conditional edit — Ragnarok's Forge Query & Edit. Select a component 'target' sheet (e.g. 'generators') and an 'attribute' column; nar… |
 | `get_piecewise_curve` | R | Read piecewise curves from the working model |
 | `remove_component` | W+confirm | Remove components by name (any component type) |
@@ -329,25 +424,23 @@ Recipes:
 
 - build a small network from scratch: add_bus -> add_generator -> add_load -> add_line -> set_snapshots -> validate_model
 - bulk-change a column with a preview: adjust_values -> adjust_values(confirm=true) -> get_journal_diff
+- clean an imported model: annuity rate and placeholder bounds: check_model -> fill_discount_rate -> fill_discount_rate(confirm=true) -> clean_placeholder_bounds -> clean_placeholder_bounds(confirm=true)
 
-**`composites`** - Plants and composite builders (CCGT, OCGT, BESS, co-firing, P2X, hydrogen). Add one plant as a unit (CCGT/OCGT with part-load and start costs, gas+H2 co-firing, BESS battery) or a power-to-X hydrogen/ammonia/methanol chain, then read plant-level results (LCOH, H2 share, CO2 avoided).
+**`composites`** - Plants and composite builders (CCGT, OCGT, BESS, co-firing, conversions). Add one plant as a unit (CCGT / OCGT with part-load and start costs, gas + H2 co-firing, BESS battery) or a sector-coupling conversion, list and edit the plants in the model, place a composite on several buses, read plant-level results.
 
 | Tool | Mode | What it does |
 |---|---|---|
 | `add_conversion` | W+confirm | Add a heat pump, electric boiler, CHP, fuel cell, methanation or simple gas turbine conversion link to the working model - the Link plus an… |
 | `add_plant` | W+confirm | Add a CCGT, OCGT gas turbine (가스터빈), BESS battery (배터리), plain generator, gas + hydrogen co-firing or P2X plant to the model as one unit, w… |
-| `build_p2x_chain` | W+confirm | Build a hydrogen (electrolyser) / ammonia / methanol / e-fuel power-to-X chain into the working model through the fragment merge (buses, ca… |
 | `delete_composite_template` | W+confirm | Delete a saved composite template by name (see list_composite_templates) |
 | `detach_composite` | W+confirm | Detach a composite into ordinary rows: its generators, links, stores and buses stay with every value but are no longer one asset (the plant… |
 | `edit_plant` | W+confirm | Edit a CCGT / OCGT / BESS battery / co-firing plant (change capacity, bus, efficiency, hydrogen share) |
-| `get_p2x_results` | R | P2X results of a stored run (hydrogen production cost 수소 생산 단가): LCOH per kg H2, LCOA per t NH3, LCOM per t MeOH, e-fuel cost per MWh and p… |
 | `get_plant_results` | R | Results of a stored run grouped by plant id (server-side groupby): per plant the generation, capacity factor, full-load hours, starts (solv… |
 | `list_composite_templates` | R | List the saved composite templates (RAGNAROK_CompositeTemplates): name, plant type and the stored spec of each |
 | `list_conversions` | R | The sector-coupling conversion templates (CCGT, OCGT, CHP, electrolyser, fuel cell, heat pump, resistive heater, gas boiler, methanation) w… |
-| `list_p2x_technologies` | R | P2X technology data used by the chain builder: electrolysers (alkaline, PEM), H2 compression and storage (tank, salt cavern), air separatio… |
 | `list_plant_types` | R | List the plant types add_plant accepts (CCGT, OCGT gas turbine, BESS battery, generator, gas + hydrogen co-firing, P2X) with fields, defaul… |
+| `list_plants` | R | The plants already in the working model (발전소 목록): one card each with plantId, type (ccgt, ocgt, bess, generator, cofiring_*, p2x), label, b… |
 | `place_composite` | W+confirm | Place a composite (CCGT, OCGT, BESS, co-firing plant, P2X chain) on several buses at once (copy-paste a plant onto N buses): one independen… |
-| `preview_p2x_chain` | R | Preview a P2X chain (electrolyser, H2 compression and storage, ammonia / methanol / e-fuel synthesis, N2 and CO2 supply, product tanks, off… |
 | `remove_plant` | W+confirm | Remove a CCGT / OCGT / BESS battery / co-firing plant |
 | `save_composite_template` | W+confirm | Save an existing composite as a reusable template (its spec without plantId and bus) in RAGNAROK_CompositeTemplates |
 | `sync_composites` | W+confirm | Sync composites with their sheet rows: after RAGNAROK_Composites cells (bus, p_nom, build_year, lifetime, ports ...) were edited, re-expand… |
@@ -355,8 +448,28 @@ Recipes:
 Recipes:
 
 - add a CCGT on bus X and solve: list_plant_types -> add_plant -> add_plant(confirm=true) -> submit_solve -> get_plant_results
-- hydrogen production cost (LCOH): list_p2x_technologies -> preview_p2x_chain -> build_p2x_chain(confirm=true) -> submit_solve -> get_p2x_results
+- see which plants exist and change one: list_plants -> edit_plant -> edit_plant(confirm=true) -> get_plant_results
 - add a simple conversion link (heat pump, boiler, CHP): list_conversions -> add_conversion -> add_conversion(confirm=true)
+- put a composite on several buses, or keep it as a template: list_composite_templates -> save_composite_template -> save_composite_template(confirm=true) -> place_composite -> place_composite(confirm=true)
+- detach a composite into plain rows, or re-sync edited sheet rows: detach_composite -> detach_composite(confirm=true) -> sync_composites -> sync_composites(confirm=true)
+
+**`p2x`** - Power-to-X (hydrogen, ammonia, methanol, e-fuel). Technology data, preview and build of an electrolyser / storage / synthesis chain, RFNBO settings and pre-solve checks, LCOH / LCOA / LCOM results of a stored run.
+
+| Tool | Mode | What it does |
+|---|---|---|
+| `build_p2x_chain` | W+confirm | Build a hydrogen (electrolyser) / ammonia / methanol / e-fuel power-to-X chain into the working model through the fragment merge (buses, ca… |
+| `check_rfnbo` | R | Pre-solve RFNBO checks on the working model: additionality (Art |
+| `get_p2x_chain_defaults` | R | The defaults the P2X chain designer starts from: the default chain spec (every key with its default), the products (H2, NH3, MeOH, eFuel),… |
+| `get_p2x_results` | R | P2X results of a stored run (hydrogen production cost 수소 생산 단가): LCOH per kg H2, LCOA per t NH3, LCOM per t MeOH, e-fuel cost per MWh and p… |
+| `get_rfnbo_config` | R | The session's stored RFNBO settings (EU renewable fuels of non-biological origin, Delegated Regulation 2023/1184: temporal matching hourly… |
+| `list_p2x_technologies` | R | P2X technology data used by the chain builder: electrolysers (alkaline, PEM), H2 compression and storage (tank, salt cavern), air separatio… |
+| `preview_p2x_chain` | R | Preview a P2X chain (electrolyser, H2 compression and storage, ammonia / methanol / e-fuel synthesis, N2 and CO2 supply, product tanks, off… |
+| `set_rfnbo_config` | W+confirm | Store the session's RFNBO settings (RFNBO 수소 인증 조건: enabled, temporal hourly \| monthly, additionality, geographic correlation, designated g… |
+
+Recipes:
+
+- hydrogen production cost (LCOH): list_p2x_technologies -> get_p2x_chain_defaults -> preview_p2x_chain -> build_p2x_chain(confirm=true) -> submit_solve -> get_p2x_results
+- RFNBO-compliant hydrogen: get_rfnbo_config -> set_rfnbo_config -> check_rfnbo -> build_p2x_chain(confirm=true) -> submit_solve(confirm=true) -> get_p2x_results
 
 **`time_ops`** - Time units and operations. Ramp rates, minimum up/down time and start-up times stated in hours or minutes; snapshot step and weightings; maintenance.
 
@@ -376,8 +489,9 @@ Recipes:
 
 - state a ramp limit in per-minute or hours: get_time_units -> set_time_units -> preview_time_units
 - change the time step to 3 hours: retarget_snapshots -> set_weightings_from_spacing -> validate_model
+- schedule maintenance: set_maintenance -> set_maintenance(confirm=true) -> get_study_result
 
-**`transforms`** - Transforms (cluster, slice, merge, sample, reshape). Reduce or reshape the working model: spatial clustering, temporal clustering, window/bus slice, merge another model, test-run sampling, demand forecast, series scaling.
+**`transforms`** - Transforms (cluster, slice, merge, sample, reshape). Reduce or reshape the working model: spatial clustering, temporal clustering, window/bus slice, merge another model, test-run sampling, demand forecast, series scaling, derive a year from the master.
 
 | Tool | Mode | What it does |
 |---|---|---|
@@ -398,7 +512,44 @@ Recipes:
 - make the model small for a quick test: cluster_network -> cluster_network(confirm=true) -> slice_model -> validate_model
 - project demand to 2040: forecast_demand -> forecast_demand(confirm=true) -> check_model
 
-**`run`** - Run and solve. Queue solves, watch and cancel them, saved scenarios, run options and solver reference, stored-run housekeeping.
+**`fuel_costs`** - Fuel prices and variable O&M. Fuel prices per carrier (a constant or a series, in MWh_thermal or the fuel's native unit), variable O&M, per-scenario fuel prices for stochastic runs: marginal cost = fuel / efficiency + VOM. Read the inputs, preview the resulting costs.
+
+| Tool | Mode | What it does |
+|---|---|---|
+| `get_fuel_costs` | R | What the fuel-costs module would send PyPSA, without solving: per Generator / Link the marginal-cost series fuel price / efficiency + VOM (… |
+| `get_fuel_inputs` | R | What the fuel-costs module will read from the working model (연료 가격 입력 확인), without computing anything: per carrier its fuel price (a series… |
+| `set_fuel_price` | W+confirm | Set (or remove) a carrier's fuel price (연료 가격, 가스 가격 시계열, gas / coal / oil / biomass price) for the fuel-costs module: at run time each uni… |
+| `set_fuel_price_scenario` | W+confirm | Set (or remove) how a STOCHASTIC scenario changes a carrier's fuel price (시나리오별 연료 가격: high / low gas), one row of RAGNAROK_FuelPriceScenar… |
+| `set_vom` | W+confirm | Set (or remove) one variable O&M row (VOM, 변동 운영비, currency per MWh of ELECTRIC output, >= 0) of the fuel-costs module, sheet RAGNAROK_Vari… |
+
+Recipes:
+
+- gas price series and VOM: get_fuel_inputs -> set_fuel_price -> set_vom -> get_fuel_costs -> submit_solve(confirm=true) -> get_study_result
+- high and low gas price scenarios: set_fuel_price_scenario -> get_fuel_costs -> describe_run_options -> submit_solve(confirm=true) -> get_study_result
+- gas price and carbon price together: set_fuel_price -> set_carbon_price -> get_fuel_costs -> submit_scenario(confirm=true) -> compare_runs
+
+**`policy`** - Policy (carbon, budgets, constraints, demand response). Carbon price (flat or schedule), annual energy/emission budgets, custom constraint DSL, carrier growth limits, demand response; RFNBO is under p2x, fuel prices under fuel_costs.
+
+| Tool | Mode | What it does |
+|---|---|---|
+| `apply_annual_budgets` | W+confirm | Write the module's horizon values (annual x sum(w)/8760) into the e_sum / constant cells of the working model, so the workbook shows what P… |
+| `apply_demand_response` | W+confirm | Write the demand-response module's rows into the working model (buses / links / stores / loads / generators / carriers), replacing its prev… |
+| `get_annual_budgets` | R | The annual-budgets sheet (RAGNAROK_AnnualBudgets) and the horizon values the module writes for the model's own horizon: annual x sum(w)/876… |
+| `get_carbon_price` | R | What the carbon-pricing module sends PyPSA for a price: per emitting generator the carbon cost per MWh (price x co2_emissions / efficiency)… |
+| `get_demand_response` | R | Demand response as workbook rows: what the module would write for a config (shiftable load: bus dr_<load>, link drlink_<load> from the pare… |
+| `set_annual_budget` | W+confirm | Cap or floor the annual energy (TWh) or CO2 emissions of a generator or carrier (annual budget) |
+| `set_carbon_price` | W+confirm | Set the carbon price (탄소 가격, CO2 price / tax, currency per tCO2) of a saved scenario preset (the module's input): price (currency/tCO2) and… |
+| `set_carrier_growth_limit` | W+confirm | Set a carrier's PyPSA growth limits on the carriers sheet: max_growth (MW of NEW capacity per investment period) and/or max_relative_growth… |
+| `set_custom_dsl` | W+confirm | Add custom constraints, e.g. a CO2 emissions cap or a generation limit per carrier: replace the model's custom-constraint DSL sheet (RAGNAR… |
+
+Recipes:
+
+- price carbon and compare: set_carbon_price -> set_carbon_price(confirm=true) -> submit_scenario -> compare_runs
+- cap a carrier's annual energy and see whether it bound: get_annual_budgets -> set_annual_budget -> apply_annual_budgets -> submit_solve(confirm=true) -> get_annual_budgets
+- add a CO2 cap or a generation limit as a constraint: set_custom_dsl -> set_custom_dsl(confirm=true) -> submit_solve
+- let demand shift in time: get_demand_response -> apply_demand_response -> apply_demand_response(confirm=true) -> get_study_result
+
+**`run`** - Run and solve. Queue solves (deterministic, stochastic, pathway, rolling and the other modes), watch and cancel them, saved scenarios, run options and solver reference, stored-run housekeeping.
 
 | Tool | Mode | What it does |
 |---|---|---|
@@ -408,7 +559,7 @@ Recipes:
 | `delete_run` | W+confirm | Delete a stored run from History (bundle + meta) |
 | `delete_scenario` | W+confirm | Remove a saved scenario preset from the model (stored runs are untouched) |
 | `describe_optimise_options` | R | Installed solvers (capability flags) and every n.optimize / study option key accepted in submit_solve's options: transmissionLosses, linear… |
-| `describe_run_options` | R | Reference for EVERY key submit_solve's scenario/options accept: type, default, unit, allowed values, meaning and the backend reader, for ~5… |
+| `describe_run_options` | R | Reference for EVERY key submit_solve's scenario/options accept: type, default, unit, allowed values, meaning and the backend reader, for ~7… |
 | `describe_scenario` | R | One saved scenario in full (every preset field) and the exact {scenario, options} run body submit_scenario would send |
 | `export_lp` | W | Write the working model's LP (or .mps) file WITHOUT solving, for inspection or an external solver |
 | `get_queue` | R | The solve queue: jobs with their status (queued/running/done/error) and concurrency settings |
@@ -428,8 +579,11 @@ Recipes:
 
 - solve the working model and read the cost: validate_model -> submit_solve -> submit_solve(confirm=true) -> get_queue -> get_kpis
 - run saved scenarios as a batch: list_scenarios -> submit_scenarios -> submit_scenarios(confirm=true) -> compare_runs
+- stochastic scenarios with an expected cost: describe_run_options(key=options.stochasticConfig) -> submit_solve(confirm=true) -> get_study_result
+- multi-period capacity expansion (pathway): describe_run_options(key=options.pathwayConfig) -> submit_solve(confirm=true) -> get_period_results
+- rolling-horizon dispatch: make_noncyclic_for_rolling -> describe_run_options(key=options.rollingConfig) -> submit_solve(confirm=true) -> get_kpis
 
-**`results`** - Results and analytics. Read stored runs: KPIs, carrier mix, prices, cost, emissions, dispatch series, PyPSA statistics, comparison, reports.
+**`results`** - Results and analytics. Read stored runs: KPIs, carrier mix, prices, cost, emissions, dispatch series, weighted per-asset totals, PyPSA statistics, comparison, reports.
 
 | Tool | Mode | What it does |
 |---|---|---|
@@ -446,6 +600,7 @@ Recipes:
 | `get_run_analysis` | R | Analytics-card metrics of a stored run, computed on the server (the UI cards show the same numbers) |
 | `get_run_model_sheet` | R | One page of a STORED run's input model sheet (what that run solved), e.g. to compare it with the working model |
 | `get_run_series` | R | A windowed, downsampled slice of a stored run's OUTPUT time-series sheet  |
+| `get_run_totals` | R | Weighted per-asset totals of a stored run, read from PyPSA's own n.statistics under the run's snapshot weightings (so a sampled or clustere… |
 | `get_statistics` | R | One PyPSA n.statistics metric on a stored run with PyPSA's own parameters |
 | `list_report_perspectives` | R | List the report perspectives (policy maker, investor, PPA buyer, lender, procurement) with their audience and section outline |
 | `list_runs` | R | List stored solve runs (newest first) with their names and metadata |
@@ -454,37 +609,24 @@ Recipes:
 
 - explain a run: list_runs -> get_kpis -> get_analytics -> get_report
 - compare two runs: list_runs -> compare_runs -> compare_run_statistics
+- who produced what, and at what cost: get_run_totals -> get_asset_details -> compare_companies
 
-**`studies`** - Reliability and market studies. Adequacy (LOLE/EENS), reserves, forced-outage Monte Carlo, ramping, ELCC, LMP decomposition, procurement hedging; enabled as options on a normal solve.
+**`studies`** - Reliability, market and company studies. Studies that ride a normal solve as options: adequacy (LOLE / EENS), reserves, outage Monte Carlo, ELCC, LMP decomposition, price formation, merchant revenue, bid strategy, PPA, ESS, company finance, stochastic, near-optimal; procurement hedging.
 
 | Tool | Mode | What it does |
 |---|---|---|
 | `describe_analytics` | R | Reliability and adequacy (loss of load, LOLE, EENS) and market analytics: the seven solve-mode reliability/market analytics (reserves, forc… |
+| `describe_studies` | R | Index of the studies a solve can carry (연구·분석 모듈: 공급 신뢰도 adequacy LOLE / EENS, reserves, forced-outage Monte Carlo, ELCC, LMP decomposition… |
+| `get_study_result` | R | One study's result of a stored run (연구 결과 읽기), without the rest of the analytics payload: study is an id from describe_studies (adequacy, r… |
 | `optimize_procurement` | R | Optimise a power-procurement hedging mix: CVaR-constrained least-cost blend of PPA / forward / retail instruments over a price series, plus… |
 
 Recipes:
 
-- run an adequacy and reserve study: describe_analytics -> describe_run_options -> submit_solve -> submit_solve(confirm=true) -> get_analytics
-
-**`policy`** - Policy (carbon, budgets, constraints, demand response). Carbon price (flat or schedule), annual energy/emission budgets, custom constraint DSL, carrier growth limits, demand response; RFNBO is a run option.
-
-| Tool | Mode | What it does |
-|---|---|---|
-| `apply_annual_budgets` | W+confirm | Write the module's horizon values (annual x sum(w)/8760) into the e_sum / constant cells of the working model, so the workbook shows what P… |
-| `apply_demand_response` | W+confirm | Write the demand-response module's rows into the working model (buses / links / stores / loads / generators / carriers), replacing its prev… |
-| `get_annual_budgets` | R | The annual-budgets sheet (RAGNAROK_AnnualBudgets) and the horizon values the module writes for the model's own horizon: annual x sum(w)/876… |
-| `get_carbon_price` | R | What the carbon-pricing module sends PyPSA for a price: per emitting generator the carbon cost per MWh (price x co2_emissions / efficiency)… |
-| `get_demand_response` | R | Demand response as workbook rows: what the module would write for a config (shiftable load: bus dr_<load>, link drlink_<load> from the pare… |
-| `get_fuel_costs` | R | What the fuel-costs module would send PyPSA, without solving: per Generator / Link the marginal-cost series fuel price / efficiency + VOM (… |
-| `set_annual_budget` | W+confirm | Cap or floor the annual energy (TWh) or CO2 emissions of a generator or carrier (annual budget) |
-| `set_carbon_price` | W+confirm | Set the carbon price (탄소 가격, CO2 price / tax, currency per tCO2) of a saved scenario preset (the module's input): price (currency/tCO2) and… |
-| `set_carrier_growth_limit` | W+confirm | Set a carrier's PyPSA growth limits on the carriers sheet: max_growth (MW of NEW capacity per investment period) and/or max_relative_growth… |
-| `set_custom_dsl` | W+confirm | Add custom constraints, e.g. a CO2 emissions cap or a generation limit per carrier: replace the model's custom-constraint DSL sheet (RAGNAR… |
-
-Recipes:
-
-- price carbon and compare: set_carbon_price -> set_carbon_price(confirm=true) -> submit_scenario -> compare_runs
-- cap a carrier's annual energy: get_annual_budgets -> set_annual_budget -> apply_annual_budgets
+- run an adequacy and reserve study: describe_studies -> describe_run_options -> submit_solve -> submit_solve(confirm=true) -> get_study_result
+- merchant revenue or PPA value of one owner: describe_studies(study=merchant) -> submit_solve(confirm=true) -> get_study_result -> compare_companies
+- what sets the price (price formation, LMP components): submit_solve(confirm=true) -> get_study_result(study=price-formation) -> get_study_result(study=lmp-decomposition)
+- storage business case: describe_studies(study=ess) -> submit_solve(confirm=true) -> get_study_result(study=ess)
+- hedge power procurement: optimize_procurement
 
 **`physical_risk`** - Physical climate risk. A separate subsystem (own session id): seed a portfolio from the model, set perils/climate/horizon, run, read damage, transition and finance results.
 
@@ -527,67 +669,15 @@ Recipes:
 Recipes:
 
 - pick complementary wind and solar sites: validate_siting_dataset -> upload_siting_dataset -> siting_correlation -> siting_optimise_portfolio -> promote_siting_sites
+- scan an area for candidate sites: siting_scan -> siting_scan(confirm=true) -> siting_cluster_sites -> promote_siting_sites
 
-**`data`** - Data import and export. Bring data in (country models, starter packs, datasets, demand database, weather profiles, PyPSA-Earth, files) and write models and runs out.
-
-| Tool | Mode | What it does |
-|---|---|---|
-| `attach_hydro_inflow` | W+confirm | Fetch GloFAS river-discharge-shaped inflow (keyless Open-Meteo Flood API) for the model's hydro storage units and attach it as storage_unit… |
-| `attach_renewable_profiles` | W+confirm | Fetch weather-derived capacity-factor profiles for the model's existing solar/wind fleet and attach them, aligning the snapshot axis to the… |
-| `build_starter_pack` | W+confirm | Assemble a runnable workbook for a country + year from its starter-pack recipe and load it |
-| `clear_master` | W+confirm | Remove the stored master model (the working model is untouched) |
-| `delete_import_secret` | W+confirm | Remove a stored importer API key |
-| `export_model` | W | Export the CURRENT working model to a file: format ∈ netcdf \| hdf5 \| project |
-| `export_pypsa_native` | W | Export the CURRENT working model as a PyPSA-native Excel workbook (kind='excel', Network.export_to_excel) or a zip of a PyPSA CSV folder (k… |
-| `export_run` | W | Export a STORED run to a file on disk |
-| `export_workbook` | W | Save / export the CURRENT working model to an Excel workbook (.xlsx), input-only  |
-| `get_demand_db_slice` | R | Hourly load of one series from the self-hosted demand database for year_from..year_to (UTC years, max 12) |
-| `get_import_provenance` | R | Recent data imports from the persistent provenance log (source, dataset, country, filters, time), newest first |
-| `get_master_meta` | R | Metadata for the multi-year MASTER model stored in this session (its sheets and the calendar 'years' it spans), or {} if none is stored |
-| `import_dataset` | W+confirm | Import one source's datasets for a country and merge them into the working model |
-| `import_demand_db` | W+confirm | Import one series from the self-hosted demand database into the working model: a national bus, a Load and an hourly loads-p_set series over… |
-| `import_master` | W+confirm | Store a multi-year project (.zip/.xlsx on disk) as the MASTER model  |
-| `import_network` | W+confirm | Import a PyPSA-native netCDF (.nc) or HDF5 (.h5) file from disk INTO the working model (format inferred from the extension) |
-| `import_project` | W+confirm | Import a Ragnarok Project .zip (or workbook .xlsx) from disk |
-| `import_pypsa_native` | W+confirm | Import a PyPSA-native or grid-model file INTO the working model through PyPSA's own importers |
-| `import_result` | W+confirm | Import a RESULT-bearing file from disk as a new History run (model + results): a Ragnarok project .zip, or a bare results .xlsx from anothe… |
-| `list_demand_db` | R | What the self-hosted hourly demand database holds: per series (key 'source/area', e.g. 'opsd/DE', 'eia930/ERCO') the country, years, covera… |
-| `list_examples` | R | List the bundled example models (id, label, description) |
-| `list_import_countries` | R | The country index importers accept (ISO codes and names) |
-| `list_import_databases` | R | The flat dataset registry: one entry per importable dataset across every source (id, source, kind, filters) |
-| `list_import_secrets` | R | Names of the API keys the backend holds for importers (stored on the server or set in its environment) |
-| `list_importers` | R | List the data-import sources Ragnarok knows, with their per-country datasets and filters |
-| `list_starter_packs` | R | Country starter-pack recipes (country → years) that build_starter_pack can assemble |
-| `load_example` | W+confirm | Load an example model (sample network) as the working model (replaces the current model) |
-| `merge_fragment` | W+confirm | Merge a WorkbookFragment (from import_dataset, siting_scan or PyPSA-Earth) into the working model with the GUI's 'Add to workbook' rules: r… |
-| `one_click_model` | W+confirm | One-click: import a country's power plants, network and demand: assemble a runnable model for a country from keyless global sources (OSM ne… |
-| `pypsa_earth_apply` | W+confirm | Load a finished PyPSA-Earth build into Ragnarok |
-| `pypsa_earth_build` | W+confirm | Start a PyPSA-Earth build for a country (country_iso like 'KR'): runs the snakemake workflow in the background (can take hours, downloads d… |
-| `pypsa_earth_build_status` | R | Status of one PyPSA-Earth build job (queued / running / done / error / stopped, phase, detail) |
-| `pypsa_earth_configure` | W+confirm | Point Ragnarok at a pypsa-earth checkout on the server (must contain a Snakefile) |
-| `pypsa_earth_status` | R | PyPSA-Earth: whether the workflow is set up on the server (and where), suggested checkout dirs, and every build job this backend knows about |
-| `pypsa_earth_stop` | W+confirm | Stop a running PyPSA-Earth build |
-| `pypsa_io_capabilities` | R | Which PyPSA-native import/export paths the backend offers, the netCDF export option keys, and the state of the isolated pandapower environm… |
-| `set_import_secret` | W+confirm | Store an importer API key on the backend (e.g. name='entsoe_token') |
-| `source_health` | R | Which upstream data sources are reachable right now |
-
-Recipes:
-
-- a runnable model for a country: list_starter_packs -> build_starter_pack -> build_starter_pack(confirm=true) -> check_model
-- save the model to a file: export_workbook -> export_model
-
-**`session`** - Session, journal, plugins. Undo and journal of edits, clear session, server health and log, backend plugins and tab modules.
+**`plugins`** - Plugins and tab modules. Backend plugins (analysis, contribute, transform, action hooks, uploaded data files) and third-party tab modules: list, install, run, remove.
 
 | Tool | Mode | What it does |
 |---|---|---|
-| `clear_session` | W+confirm | Clear the working model in this session (start from an empty network) |
 | `delete_plugin_file` | W+confirm | Delete one uploaded data file from a backend plugin |
-| `get_journal` | R | The mutation journal — newest-first entries of every edit made to the session (by you or the user), with actor, kind and a summary. Read it… |
-| `get_journal_diff` | R | The detailed before/after diff for one journal entry (cell-level or sheet-level) |
 | `get_plugin` | R | One backend plugin's manifest: hooks, GUI config schema, actions and options sources |
 | `get_plugin_options` | R | Ask a backend plugin for the choices of one of its dropdowns ('name' = the options source in its manifest), given the current config |
-| `get_server_info` | R | Which Ragnarok this is and whether it is ready: health checks (store, queue, solver, disk), warm-up status, checkout root + data dir, optim… |
-| `get_server_log` | R | Recent backend log lines (HTTP access, errors, backend loggers), newest last |
 | `install_plugin` | W+confirm | Install (or update) a BACKEND plugin from a .zip or a directory on disk holding manifest.json + plugin.py |
 | `install_tab_module` | W+confirm | Install a third-party tab-module from a DIRECTORY on this machine  |
 | `install_tab_module_zip` | W+confirm | Install a third-party tab-module from a .zip on disk (the zip form of install_tab_module, which takes a directory) |
@@ -595,25 +685,39 @@ Recipes:
 | `list_plugins` | R | List installed plugins and their ids/config |
 | `list_tab_modules` | R | List third-party tab-modules installed on the server: id, label, activity-bar order, whether the tab is shown, and the package's files |
 | `refresh_plugins` | R | Re-scan the plugins directory (picks up a plugin copied in by hand) and list the loaded backend plugins |
-| `reload_config` | W+confirm | Rebuild the cached PyPSA schema/config bundle (after the PyPSA package changed) without restarting the backend |
 | `remove_tab_module` | W+confirm | Uninstall a third-party tab-module: deletes its package directory on the server and removes its tab |
-| `revert_session` | W+confirm | Revert the session to a past version by undoing EVERY entry newer than to_version (newest first) |
 | `run_plugin_action` | W+confirm | Run a backend plugin's named action hook (a manifest 'action' button, e.g. 'Fill table') with a config |
 | `run_plugin_analysis` | R | Run an installed plugin's read-only analyze(result, config) hook and return its output  |
 | `run_plugin_contribute` | W+confirm | Run an installed plugin's contribute(model, config) hook and MERGE its produced sheets + DSL constraints into the working model (additive,… |
 | `run_plugin_transform` | W+confirm | Run an installed plugin's transform(model, config) hook, which rewrites the working model and persists it |
 | `set_tab_module_enabled` | W+confirm | Show or hide an installed tab-module's tab |
-| `tool_catalogue` | R | Find the right Ragnarok tool for a task |
-| `undo_journal_entry` | W+confirm | Undo my last edit: undo a single journal entry by id (self-correct a bad edit) |
 | `uninstall_plugin` | W+confirm | Uninstall a backend plugin: deletes its directory and its uploaded data files |
 | `upload_plugin_file` | W+confirm | Upload a data file from disk into a backend plugin's server-side store (e.g. the workbook a dashboard importer reads) |
 
 Recipes:
 
-- undo a bad edit: get_journal -> get_journal_diff -> undo_journal_entry -> undo_journal_entry(confirm=true)
-- put a composite on several buses, or keep it as a template: list_composite_templates -> save_composite_template -> save_composite_template(confirm=true) -> place_composite -> place_composite(confirm=true)
-- detach a composite into plain rows, or re-sync edited sheet rows: detach_composite -> detach_composite(confirm=true) -> sync_composites -> sync_composites(confirm=true)
 - run a plugin analysis on a run: list_plugins -> get_plugin -> run_plugin_analysis
+- install a plugin and use it: install_plugin -> install_plugin(confirm=true) -> get_plugin -> run_plugin_action(confirm=true)
+- install a third-party tab module: install_tab_module -> install_tab_module(confirm=true) -> set_tab_module_enabled -> list_tab_modules
+
+**`session`** - Session, journal, server. Undo and journal of edits, revert, clear the session, server health and log, reload the schema, and tool_catalogue (this routing).
+
+| Tool | Mode | What it does |
+|---|---|---|
+| `clear_session` | W+confirm | Clear the working model in this session (start from an empty network) |
+| `get_journal` | R | The mutation journal — newest-first entries of every edit made to the session (by you or the user), with actor, kind and a summary. Read it… |
+| `get_journal_diff` | R | The detailed before/after diff for one journal entry (cell-level or sheet-level) |
+| `get_server_info` | R | Which Ragnarok this is and whether it is ready: health checks (store, queue, solver, disk), warm-up status, checkout root + data dir, optim… |
+| `get_server_log` | R | Recent backend log lines (HTTP access, errors, backend loggers), newest last |
+| `reload_config` | W+confirm | Rebuild the cached PyPSA schema/config bundle (after the PyPSA package changed) without restarting the backend |
+| `revert_session` | W+confirm | Revert the session to a past version by undoing EVERY entry newer than to_version (newest first) |
+| `tool_catalogue` | R | Find the right Ragnarok tool for a task (도구 찾기) |
+| `undo_journal_entry` | W+confirm | Undo my last edit: undo a single journal entry by id (self-correct a bad edit) |
+
+Recipes:
+
+- undo a bad edit: get_journal -> get_journal_diff -> undo_journal_entry -> undo_journal_entry(confirm=true)
+- is the server healthy and which build is it: get_server_info -> get_server_log
 
 <!-- tool-catalogue:end -->
 
@@ -694,7 +798,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 206 tools spanning the full surface (§2.7 lists the newest 89): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
+| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 220 tools spanning the full surface (§2.7 lists the ones in `tools_*.py`): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |

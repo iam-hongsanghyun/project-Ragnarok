@@ -59,6 +59,38 @@ _FUELS: list[tuple[str, str, str, Any]] = [
 ]
 
 
+def native_unit(carrier: str) -> str | None:
+    """The physical unit a carrier's price is quoted in (``MMBtu``, ``tonne``, ``bbl``, ``MWh_th``), ``None`` when the
+    importer has no conversion for it. Currency is not part of it (``$/MMBtu`` and ``EUR/MMBtu`` are both ``MMBtu``)."""
+    for _fid, name, raw_unit, _conv in _FUELS:
+        if name == carrier:
+            return raw_unit.split("/", 1)[1]
+    return None
+
+
+def to_thermal(carrier: str, value: float, unit: str) -> float:
+    """``value`` (currency per ``unit``) as currency/MWh_thermal with the importer's own conversion factors.
+
+    ``unit`` is ``MWh_th`` (no conversion) or the carrier's :func:`native_unit`. Raises ``ValueError`` with the valid
+    choices otherwise.
+
+    Algorithm:
+        $$ p_{th} = p_{native} \\cdot k_c \\quad\\text{or}\\quad p_{th} = p_{native} / e_c $$
+
+        ASCII: ``p_th = p_native * k`` for gas (k = 3.412142 MMBtu/MWh), ``p_th = p_native / e`` for coal / oil / biomass
+        (e = 6.978 MWh/tonne, 1.699 MWh/bbl, 4.900 MWh/tonne). ``p`` in currency per unit, ``p_th`` in currency/MWh_thermal.
+    """
+    if unit == "MWh_th":
+        return float(value)
+    for _fid, name, raw_unit, conv in _FUELS:
+        if name == carrier and raw_unit.split("/", 1)[1] == unit:
+            return float(conv(float(value)))
+    native = native_unit(carrier)
+    options = f"MWh_th or {native}" if native and native != "MWh_th" else "MWh_th"
+    known = ", ".join(f"{n} ({r.split('/', 1)[1]})" for _f, n, r, _c in _FUELS)
+    raise ValueError(f"unit {unit!r} is not valid for carrier {carrier!r}; valid: {options}. Carriers with a native unit: {known}.")
+
+
 def convert_fuel_prices(filters: dict[str, Any]) -> list[dict[str, Any]]:
     """Pure: filter values → carrier rows with thermal ``fuel_cost_thermal``.
 

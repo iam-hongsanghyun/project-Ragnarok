@@ -10,11 +10,15 @@ Tools:
 * ``preview_p2x_chain``     - read-only: what a chain spec would add to the working model (nothing is written).
 * ``get_p2x_results``       - read-only: LCOH, LCOA, LCOM, e-fuel cost, cost waterfall, RFNBO compliance of a stored run.
 * ``build_p2x_chain``       - WRITE (gated, confirm=true): merge the chain into the working model.
+* ``get_p2x_chain_defaults``- read-only: the default chain spec, the products, the model's default anchor bus.
+* ``get_rfnbo_config``      - read-only: the session's stored RFNBO settings and the defaults.
+* ``set_rfnbo_config``      - WRITE (cheap): store the session's RFNBO settings (what a run without options.rfnboConfig uses).
+* ``check_rfnbo``           - read-only: pre-solve additionality / geographic-correlation checks (what each filter would drop).
 
-RFNBO hourly / monthly matching is a run option, so it needs no tool of its own: pass
+RFNBO hourly / monthly matching is a run option too: pass
 ``options={"rfnboConfig": {"enabled": true, "temporal": "hourly"}}`` to ``submit_solve`` (or ``options_patch`` of
 ``submit_scenario``); ``describe_run_options(key="options.rfnboConfig")`` documents every field. A run that sets no
-``rfnboConfig`` uses the settings last saved in the P2X tab for the session.
+``rfnboConfig`` uses the settings stored with ``set_rfnbo_config`` (the P2X tab saves the same record).
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from typing import Any
 
 from .catalogue import declare_areas
 from .server import _MUT, _RO, _needs_confirm, _preview, get_client, mcp
+from .tools_runspec import _EDIT
 
 _SPEC_HELP = (
     "spec keys (all optional): chainId, anchorBus, discountRate (fraction), products (subset of H2, NH3, MeOH, eFuel), h2Bus, "
@@ -112,10 +117,66 @@ async def build_p2x_chain(spec: dict[str, Any] | None = None, confirm: bool = Fa
     return _trim(await _chain(spec, apply=True))
 
 
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "The defaults the P2X chain designer starts from: the default chain spec (every key with its default), the products (H2, NH3, MeOH, eFuel), the model's default anchor bus and the technology labels. "
+        "Start here to see what a spec for preview_p2x_chain / build_p2x_chain looks like for THIS model."
+    ),
+)
+async def get_p2x_chain_defaults() -> Any:
+    client = get_client()
+    return await client._get("/api/p2x/chain/defaults", {"session_id": client.session_id})
+
+
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "The session's stored RFNBO settings (EU renewable fuels of non-biological origin, Delegated Regulation 2023/1184: temporal matching hourly / monthly, additionality, geographic correlation) "
+        "and the defaults; config is null when never set. A run that sets no options.rfnboConfig uses these. set_rfnbo_config stores them; check_rfnbo shows what they would do before a solve."
+    ),
+)
+async def get_rfnbo_config() -> Any:
+    client = get_client()
+    return await client._get("/api/p2x/rfnbo/config", {"session_id": client.session_id})
+
+
+@mcp.tool(
+    annotations=_EDIT,
+    description=(
+        "Store the session's RFNBO settings (RFNBO 수소 인증 조건: enabled, temporal hourly | monthly, additionality, geographic correlation, designated generators ...), the record the P2X tab edits. "
+        "A run without options.rfnboConfig uses it. config holds the fields of describe_run_options(key='options.rfnboConfig'); an invalid field is refused with the valid choices. "
+        "Without confirm=true (under autonomy manual) it returns the preview."
+    ),
+)
+async def set_rfnbo_config(config: dict[str, Any], confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview("Store the session's RFNBO settings.", {"config": config})
+    client = get_client()
+    return await client._put("/api/p2x/rfnbo/config", {"sessionId": client.session_id, "config": config})
+
+
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "Pre-solve RFNBO checks on the working model: additionality (Art. 5(a)) and geographic correlation (Art. 7(1)(a)), which generators each filter would drop, the electrolysers and designated "
+        "generators found, and whether a run with these settings would be refused (willBeRefused). Items that need attestation or a solved run (Art. 5(b), 7(1)(b)/(c), 4) are listed as such. "
+        "config defaults to the stored settings (get_rfnbo_config)."
+    ),
+)
+async def check_rfnbo(config: dict[str, Any] | None = None) -> Any:
+    client = get_client()
+    return await client._post("/api/p2x/rfnbo/checks", {"sessionId": client.session_id, **({"config": config} if config is not None else {})})
+
+
 # Tool areas (see catalogue.py).
 declare_areas({
-    "list_p2x_technologies": "composites",
-    "preview_p2x_chain": "composites",
-    "get_p2x_results": "composites",
-    "build_p2x_chain": "composites",
+    "get_p2x_chain_defaults": "p2x",
+    "get_rfnbo_config": "p2x",
+    "set_rfnbo_config": "p2x",
+    "check_rfnbo": "p2x",
+    "list_p2x_technologies": "p2x",
+    "preview_p2x_chain": "p2x",
+    "get_p2x_results": "p2x",
+    "build_p2x_chain": "p2x",
 })

@@ -274,5 +274,122 @@
   "expect": [
    "detach_composite"
   ]
+ },
+ {
+  "request": "가스 가격 시계열 넣어줘",
+  "expect": [
+   "set_fuel_price"
+  ]
+ },
+ {
+  "request": "set the gas price to 8 $/MMBtu",
+  "expect": [
+   "set_fuel_price"
+  ]
+ },
+ {
+  "request": "연료 가격 입력 확인",
+  "expect": [
+   "get_fuel_inputs",
+   "get_fuel_costs"
+  ]
+ },
+ {
+  "request": "VOM 설정",
+  "expect": [
+   "set_vom"
+  ]
+ },
+ {
+  "request": "set variable O&M of the coal units",
+  "expect": [
+   "set_vom"
+  ]
+ },
+ {
+  "request": "high and low gas price scenario for the stochastic run",
+  "expect": [
+   "set_fuel_price_scenario"
+  ]
+ },
+ {
+  "request": "what marginal cost will the gas units get from fuel price and efficiency",
+  "expect": [
+   "get_fuel_costs"
+  ]
+ },
+ {
+  "request": "which plants are in the model",
+  "expect": [
+   "list_plants"
+  ]
+ },
+ {
+  "request": "발전소 목록 보여줘",
+  "expect": [
+   "list_plants"
+  ]
+ },
+ {
+  "request": "check RFNBO additionality before solving",
+  "expect": [
+   "check_rfnbo",
+   "get_rfnbo_config"
+  ]
+ },
+ {
+  "request": "RFNBO 조건 저장",
+  "expect": [
+   "set_rfnbo_config"
+  ]
+ },
+ {
+  "request": "what studies can a solve carry",
+  "expect": [
+   "describe_studies"
+  ]
+ },
+ {
+  "request": "show the loss of load study result of that run",
+  "expect": [
+   "get_study_result"
+  ]
+ },
+ {
+  "request": "공급 신뢰도 연구 결과 읽기",
+  "expect": [
+   "get_study_result",
+   "describe_studies"
+  ]
+ },
+ {
+  "request": "weighted energy and operating cost per generator of a run",
+  "expect": [
+   "get_run_totals"
+  ]
+ },
+ {
+  "request": "did the annual budget bind in that run",
+  "expect": [
+   "get_annual_budgets"
+  ]
+ },
+ {
+  "request": "fill the discount rate into the overnight cost rows",
+  "expect": [
+   "fill_discount_rate"
+  ]
+ },
+ {
+  "request": "할인율 채우기",
+  "expect": [
+   "fill_discount_rate"
+  ]
+ },
+ {
+  "request": "clear the 1e12 placeholder bounds",
+  "expect": [
+   "clean_placeholder_bounds"
+  ]
  }
 ]

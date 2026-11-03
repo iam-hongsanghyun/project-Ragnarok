@@ -43,10 +43,10 @@ AREAS: dict[str, Area] = {
         Area(
             "inspect",
             "Inspect the model",
-            "Read what is loaded: sheets, component schema, series windows, validity checks. Never changes anything.",
+            "Read what is loaded: sheets, component schema, series windows, validity and grid-topology checks. Never changes anything.",
             ("get_world_state", "check_model", "get_sheet_page"),
-            "loaded model buses carriers snapshots sheet rows statistics validate check schema attribute "
-            "모델 확인 시트 버스 검증 속성",
+            "loaded model buses carriers snapshots sheet rows statistics validate check schema attribute topology "
+            "consistency ptdf subnetwork 모델 확인 시트 버스 검증 속성 점검",
             (
                 (
                     "what is loaded and is it right",
@@ -56,15 +56,123 @@ AREAS: dict[str, Area] = {
                     "look inside a sheet",
                     ("get_sheet_stats", "get_sheet_page", "derive_series"),
                 ),
+                (
+                    "check the grid structure before a solve",
+                    ("consistency_check", "network_analysis", "validate_model"),
+                ),
+            ),
+        ),
+        Area(
+            "data",
+            "Data import",
+            "Bring data in: country models and starter packs, importer datasets, the demand database, weather-derived "
+            "profiles, PyPSA-Earth builds, importer API keys.",
+            (
+                "list_starter_packs",
+                "build_starter_pack",
+                "import_dataset",
+                "one_click_model",
+            ),
+            "import download dataset country starter pack osm power plants demand database weather renewable profile "
+            "hydro inflow pypsa-earth api key source health 데이터 가져오기 국가 발전소 수요 데이터베이스 날씨 프로파일",
+            (
+                (
+                    "a runnable model for a country",
+                    (
+                        "list_starter_packs",
+                        "build_starter_pack",
+                        "build_starter_pack(confirm=true)",
+                        "check_model",
+                    ),
+                ),
+                (
+                    "build a model from data, check it and solve",
+                    (
+                        "list_starter_packs",
+                        "build_starter_pack(confirm=true)",
+                        "check_model",
+                        "validate_model",
+                        "submit_solve(confirm=true)",
+                        "get_kpis",
+                    ),
+                ),
+                (
+                    "pick datasets for a country yourself",
+                    (
+                        "list_importers",
+                        "list_import_databases",
+                        "import_dataset",
+                        "import_dataset(confirm=true)",
+                    ),
+                ),
+                (
+                    "add weather-based solar and wind profiles to the fleet",
+                    (
+                        "attach_renewable_profiles",
+                        "attach_renewable_profiles(confirm=true)",
+                        "check_model",
+                    ),
+                ),
+                (
+                    "take demand from the demand database",
+                    (
+                        "list_demand_db",
+                        "get_demand_db_slice",
+                        "import_demand_db(confirm=true)",
+                    ),
+                ),
+                (
+                    "build a country grid with PyPSA-Earth",
+                    (
+                        "pypsa_earth_status",
+                        "pypsa_earth_build(confirm=true)",
+                        "pypsa_earth_build_status",
+                        "pypsa_earth_apply(confirm=true)",
+                    ),
+                ),
+            ),
+        ),
+        Area(
+            "files",
+            "Files, projects and examples",
+            "Save and load the model as a workbook, project zip, PyPSA netCDF / HDF5 / Excel / CSV or a MATPOWER / pandapower case; "
+            "export a stored run; the multi-year master model; bundled examples.",
+            ("export_workbook", "import_project", "export_model", "load_example"),
+            "export save file workbook xlsx netcdf hdf5 csv zip project matpower pandapower import example sample network "
+            "master multi-year result download 파일 내보내기 저장 불러오기 예제 프로젝트",
+            (
+                ("save the model to a file", ("export_workbook", "export_model")),
+                (
+                    "open a PyPSA or grid-model file",
+                    (
+                        "pypsa_io_capabilities",
+                        "import_pypsa_native",
+                        "import_pypsa_native(confirm=true)",
+                        "check_model",
+                    ),
+                ),
+                (
+                    "export a stored run for someone else",
+                    ("list_runs", "export_run"),
+                ),
+                (
+                    "start from a bundled example",
+                    ("list_examples", "load_example", "load_example(confirm=true)", "check_model"),
+                ),
+                (
+                    "keep a multi-year master and work on one year",
+                    ("import_master(confirm=true)", "get_master_meta", "derive_from_master", "derive_from_master(confirm=true)"),
+                ),
             ),
         ),
         Area(
             "build",
             "Build and edit components",
-            "Add or change buses, generators, loads, lines, storage and any PyPSA component; bulk edits; piecewise cost curves.",
+            "Add or change buses, generators, loads, lines, storage and any PyPSA component; bulk edits; piecewise cost curves; "
+            "Forge fixes (discount rate, placeholder bounds).",
             ("add_generator", "edit_sheet", "forge_query", "add_component"),
-            "add generator load line bus battery storage edit sheet cell bulk adjust capacity capital cost "
-            "piecewise curve 발전기 부하 선로 배터리 저장 편집 용량",
+            "add generator load line bus battery storage edit sheet cell bulk adjust capacity capital cost discount rate "
+            "overnight cost placeholder bound piecewise curve 발전기 부하 선로 배터리 저장 편집 용량 할인율",
             (
                 (
                     "build a small network from scratch",
@@ -85,17 +193,27 @@ AREAS: dict[str, Area] = {
                         "get_journal_diff",
                     ),
                 ),
+                (
+                    "clean an imported model: annuity rate and placeholder bounds",
+                    (
+                        "check_model",
+                        "fill_discount_rate",
+                        "fill_discount_rate(confirm=true)",
+                        "clean_placeholder_bounds",
+                        "clean_placeholder_bounds(confirm=true)",
+                    ),
+                ),
             ),
         ),
         Area(
             "composites",
-            "Plants and composite builders (CCGT, OCGT, BESS, co-firing, P2X, hydrogen)",
-            "Add one plant as a unit (CCGT/OCGT with part-load and start costs, gas+H2 co-firing, BESS battery) or a "
-            "power-to-X hydrogen/ammonia/methanol chain, then read plant-level results (LCOH, H2 share, CO2 avoided).",
-            ("list_plant_types", "add_plant", "place_composite", "build_p2x_chain", "get_plant_results"),
-            "ccgt ocgt gas turbine combined cycle bess battery cofiring co-firing hydrogen h2 electrolyser ammonia "
-            "methanol lcoh rfnbo conversion heat pump chp composite template place copy paste detach sync "
-            "가스터빈 복합 배터리 수소 전해조 암모니아 혼소 생산 단가 플랜트 발전소",
+            "Plants and composite builders (CCGT, OCGT, BESS, co-firing, conversions)",
+            "Add one plant as a unit (CCGT / OCGT with part-load and start costs, gas + H2 co-firing, BESS battery) or a "
+            "sector-coupling conversion, list and edit the plants in the model, place a composite on several buses, "
+            "read plant-level results.",
+            ("list_plants", "list_plant_types", "add_plant", "place_composite", "get_plant_results"),
+            "plant ccgt ocgt gas turbine combined cycle bess battery cofiring co-firing conversion heat pump boiler chp "
+            "composite template place copy paste detach sync 가스터빈 복합 배터리 혼소 플랜트 발전소 변환",
             (
                 (
                     "add a CCGT on bus X and solve",
@@ -108,13 +226,12 @@ AREAS: dict[str, Area] = {
                     ),
                 ),
                 (
-                    "hydrogen production cost (LCOH)",
+                    "see which plants exist and change one",
                     (
-                        "list_p2x_technologies",
-                        "preview_p2x_chain",
-                        "build_p2x_chain(confirm=true)",
-                        "submit_solve",
-                        "get_p2x_results",
+                        "list_plants",
+                        "edit_plant",
+                        "edit_plant(confirm=true)",
+                        "get_plant_results",
                     ),
                 ),
                 (
@@ -123,6 +240,58 @@ AREAS: dict[str, Area] = {
                         "list_conversions",
                         "add_conversion",
                         "add_conversion(confirm=true)",
+                    ),
+                ),
+                (
+                    "put a composite on several buses, or keep it as a template",
+                    (
+                        "list_composite_templates",
+                        "save_composite_template",
+                        "save_composite_template(confirm=true)",
+                        "place_composite",
+                        "place_composite(confirm=true)",
+                    ),
+                ),
+                (
+                    "detach a composite into plain rows, or re-sync edited sheet rows",
+                    (
+                        "detach_composite",
+                        "detach_composite(confirm=true)",
+                        "sync_composites",
+                        "sync_composites(confirm=true)",
+                    ),
+                ),
+            ),
+        ),
+        Area(
+            "p2x",
+            "Power-to-X (hydrogen, ammonia, methanol, e-fuel)",
+            "Technology data, preview and build of an electrolyser / storage / synthesis chain, RFNBO settings and pre-solve checks, "
+            "LCOH / LCOA / LCOM results of a stored run.",
+            ("list_p2x_technologies", "preview_p2x_chain", "build_p2x_chain", "get_p2x_results"),
+            "p2x power-to-x hydrogen h2 electrolyser electrolysis ammonia methanol e-fuel lcoh lcoa lcom rfnbo additionality "
+            "temporal matching hourly monthly 수소 생산 단가 전해조 암모니아 메탄올 재생연료",
+            (
+                (
+                    "hydrogen production cost (LCOH)",
+                    (
+                        "list_p2x_technologies",
+                        "get_p2x_chain_defaults",
+                        "preview_p2x_chain",
+                        "build_p2x_chain(confirm=true)",
+                        "submit_solve",
+                        "get_p2x_results",
+                    ),
+                ),
+                (
+                    "RFNBO-compliant hydrogen",
+                    (
+                        "get_rfnbo_config",
+                        "set_rfnbo_config",
+                        "check_rfnbo",
+                        "build_p2x_chain(confirm=true)",
+                        "submit_solve(confirm=true)",
+                        "get_p2x_results",
                     ),
                 ),
             ),
@@ -148,16 +317,20 @@ AREAS: dict[str, Area] = {
                         "validate_model",
                     ),
                 ),
+                (
+                    "schedule maintenance",
+                    ("set_maintenance", "set_maintenance(confirm=true)", "get_study_result"),
+                ),
             ),
         ),
         Area(
             "transforms",
             "Transforms (cluster, slice, merge, sample, reshape)",
             "Reduce or reshape the working model: spatial clustering, temporal clustering, window/bus slice, merge another "
-            "model, test-run sampling, demand forecast, series scaling.",
+            "model, test-run sampling, demand forecast, series scaling, derive a year from the master.",
             ("cluster_network", "temporal_cluster", "slice_model", "sample_workbook"),
             "cluster reduce aggregate slice window merge sample representative days forecast demand growth ev "
-            "scale series 클러스터 축소 병합 샘플링 수요 예측",
+            "scale series master derive 클러스터 축소 병합 샘플링 수요 예측",
             (
                 (
                     "make the model small for a quick test",
@@ -175,12 +348,98 @@ AREAS: dict[str, Area] = {
             ),
         ),
         Area(
+            "fuel_costs",
+            "Fuel prices and variable O&M",
+            "Fuel prices per carrier (a constant or a series, in MWh_thermal or the fuel's native unit), variable O&M, per-scenario fuel "
+            "prices for stochastic runs: marginal cost = fuel / efficiency + VOM. Read the inputs, preview the resulting costs.",
+            ("get_fuel_inputs", "set_fuel_price", "set_vom", "get_fuel_costs"),
+            "fuel price gas coal oil biomass uranium mmbtu tonne thermal vom variable o&m marginal cost heat rate efficiency "
+            "scenario high low smp 연료 가격 가스 석탄 변동 운영비 한계비용 시계열 시나리오 열효율",
+            (
+                (
+                    "gas price series and VOM",
+                    (
+                        "get_fuel_inputs",
+                        "set_fuel_price",
+                        "set_vom",
+                        "get_fuel_costs",
+                        "submit_solve(confirm=true)",
+                        "get_study_result",
+                    ),
+                ),
+                (
+                    "high and low gas price scenarios",
+                    (
+                        "set_fuel_price_scenario",
+                        "get_fuel_costs",
+                        "describe_run_options",
+                        "submit_solve(confirm=true)",
+                        "get_study_result",
+                    ),
+                ),
+                (
+                    "gas price and carbon price together",
+                    (
+                        "set_fuel_price",
+                        "set_carbon_price",
+                        "get_fuel_costs",
+                        "submit_scenario(confirm=true)",
+                        "compare_runs",
+                    ),
+                ),
+            ),
+        ),
+        Area(
+            "policy",
+            "Policy (carbon, budgets, constraints, demand response)",
+            "Carbon price (flat or schedule), annual energy/emission budgets, custom constraint DSL, carrier growth limits, "
+            "demand response; RFNBO is under p2x, fuel prices under fuel_costs.",
+            (
+                "set_carbon_price",
+                "set_annual_budget",
+                "set_custom_dsl",
+                "apply_demand_response",
+            ),
+            "carbon price co2 emission cap budget constraint dsl demand response shiftable load growth limit "
+            "탄소 가격 배출 상한 예산 제약 수요반응",
+            (
+                (
+                    "price carbon and compare",
+                    (
+                        "set_carbon_price",
+                        "set_carbon_price(confirm=true)",
+                        "submit_scenario",
+                        "compare_runs",
+                    ),
+                ),
+                (
+                    "cap a carrier's annual energy and see whether it bound",
+                    (
+                        "get_annual_budgets",
+                        "set_annual_budget",
+                        "apply_annual_budgets",
+                        "submit_solve(confirm=true)",
+                        "get_annual_budgets",
+                    ),
+                ),
+                (
+                    "add a CO2 cap or a generation limit as a constraint",
+                    ("set_custom_dsl", "set_custom_dsl(confirm=true)", "submit_solve"),
+                ),
+                (
+                    "let demand shift in time",
+                    ("get_demand_response", "apply_demand_response", "apply_demand_response(confirm=true)", "get_study_result"),
+                ),
+            ),
+        ),
+        Area(
             "run",
             "Run and solve",
-            "Queue solves, watch and cancel them, saved scenarios, run options and solver reference, stored-run housekeeping.",
+            "Queue solves (deterministic, stochastic, pathway, rolling and the other modes), watch and cancel them, saved scenarios, "
+            "run options and solver reference, stored-run housekeeping.",
             ("submit_solve", "get_queue", "describe_run_options", "submit_scenario"),
             "solve run optimise queue scenario solver options linear programming mip dispatch capacity expansion "
-            "pathway multi-period lp 실행 최적화 시나리오 솔버",
+            "pathway multi-period stochastic rolling horizon sclopf mga lp 실행 최적화 시나리오 솔버 확률론 다기간 롤링",
             (
                 (
                     "solve the working model and read the cost",
@@ -201,15 +460,41 @@ AREAS: dict[str, Area] = {
                         "compare_runs",
                     ),
                 ),
+                (
+                    "stochastic scenarios with an expected cost",
+                    (
+                        "describe_run_options(key=options.stochasticConfig)",
+                        "submit_solve(confirm=true)",
+                        "get_study_result",
+                    ),
+                ),
+                (
+                    "multi-period capacity expansion (pathway)",
+                    (
+                        "describe_run_options(key=options.pathwayConfig)",
+                        "submit_solve(confirm=true)",
+                        "get_period_results",
+                    ),
+                ),
+                (
+                    "rolling-horizon dispatch",
+                    (
+                        "make_noncyclic_for_rolling",
+                        "describe_run_options(key=options.rollingConfig)",
+                        "submit_solve(confirm=true)",
+                        "get_kpis",
+                    ),
+                ),
             ),
         ),
         Area(
             "results",
             "Results and analytics",
-            "Read stored runs: KPIs, carrier mix, prices, cost, emissions, dispatch series, PyPSA statistics, comparison, reports.",
+            "Read stored runs: KPIs, carrier mix, prices, cost, emissions, dispatch series, weighted per-asset totals, PyPSA statistics, "
+            "comparison, reports.",
             ("list_runs", "get_kpis", "get_analytics", "get_report"),
             "results kpi cost emissions price dispatch generation capacity factor mix compare runs report statistics "
-            "결과 비용 배출 가격 급전 비교 보고서",
+            "totals asset company pathway period 결과 비용 배출 가격 급전 비교 보고서",
             (
                 (
                     "explain a run",
@@ -219,55 +504,56 @@ AREAS: dict[str, Area] = {
                     "compare two runs",
                     ("list_runs", "compare_runs", "compare_run_statistics"),
                 ),
+                (
+                    "who produced what, and at what cost",
+                    ("get_run_totals", "get_asset_details", "compare_companies"),
+                ),
             ),
         ),
         Area(
             "studies",
-            "Reliability and market studies",
-            "Adequacy (LOLE/EENS), reserves, forced-outage Monte Carlo, ramping, ELCC, LMP decomposition, procurement hedging; "
-            "enabled as options on a normal solve.",
-            ("describe_analytics", "optimize_procurement"),
-            "adequacy reliability lole eens reserve outage monte carlo elcc lmp congestion procurement ppa hedge cvar "
-            "신뢰도 예비력 공급 충분성 조달",
+            "Reliability, market and company studies",
+            "Studies that ride a normal solve as options: adequacy (LOLE / EENS), reserves, outage Monte Carlo, ELCC, LMP decomposition, "
+            "price formation, merchant revenue, bid strategy, PPA, ESS, company finance, stochastic, near-optimal; procurement hedging.",
+            ("describe_studies", "get_study_result", "describe_analytics", "optimize_procurement"),
+            "study adequacy reliability lole eens reserve outage monte carlo elcc lmp congestion price formation merchant bid ppa "
+            "ess asset swap company finance npv irr stochastic mga near-optimal procurement hedge cvar "
+            "신뢰도 예비력 공급 충분성 조달 시장 연구 분석",
             (
                 (
                     "run an adequacy and reserve study",
                     (
-                        "describe_analytics",
+                        "describe_studies",
                         "describe_run_options",
                         "submit_solve",
                         "submit_solve(confirm=true)",
-                        "get_analytics",
+                        "get_study_result",
                     ),
                 ),
-            ),
-        ),
-        Area(
-            "policy",
-            "Policy (carbon, budgets, constraints, demand response)",
-            "Carbon price (flat or schedule), annual energy/emission budgets, custom constraint DSL, carrier growth limits, "
-            "demand response; RFNBO is a run option.",
-            (
-                "set_carbon_price",
-                "set_annual_budget",
-                "set_custom_dsl",
-                "apply_demand_response",
-            ),
-            "carbon price co2 emission cap budget constraint dsl demand response shiftable load growth limit "
-            "탄소 가격 배출 상한 예산 제약 수요반응",
-            (
                 (
-                    "price carbon and compare",
+                    "merchant revenue or PPA value of one owner",
                     (
-                        "set_carbon_price",
-                        "set_carbon_price(confirm=true)",
-                        "submit_scenario",
-                        "compare_runs",
+                        "describe_studies(study=merchant)",
+                        "submit_solve(confirm=true)",
+                        "get_study_result",
+                        "compare_companies",
                     ),
                 ),
                 (
-                    "cap a carrier's annual energy",
-                    ("get_annual_budgets", "set_annual_budget", "apply_annual_budgets"),
+                    "what sets the price (price formation, LMP components)",
+                    (
+                        "submit_solve(confirm=true)",
+                        "get_study_result(study=price-formation)",
+                        "get_study_result(study=lmp-decomposition)",
+                    ),
+                ),
+                (
+                    "storage business case",
+                    ("describe_studies(study=ess)", "submit_solve(confirm=true)", "get_study_result(study=ess)"),
+                ),
+                (
+                    "hedge power procurement",
+                    ("optimize_procurement",),
                 ),
             ),
         ),
@@ -277,7 +563,7 @@ AREAS: dict[str, Area] = {
             "A separate subsystem (own session id): seed a portfolio from the model, set perils/climate/horizon, run, "
             "read damage, transition and finance results.",
             ("physical_risk_seed", "physical_risk_run", "physical_risk_report"),
-            "physical risk climate flood heat wildfire peril ngfs rcp ssp damage transition premium "
+            "physical risk climate flood heat wave wildfire peril ngfs rcp ssp damage transition premium "
             "물리적 기후 리스크 홍수 폭염",
             (
                 (
@@ -310,40 +596,53 @@ AREAS: dict[str, Area] = {
                         "promote_siting_sites",
                     ),
                 ),
+                (
+                    "scan an area for candidate sites",
+                    ("siting_scan", "siting_scan(confirm=true)", "siting_cluster_sites", "promote_siting_sites"),
+                ),
             ),
         ),
         Area(
-            "data",
-            "Data import and export",
-            "Bring data in (country models, starter packs, datasets, demand database, weather profiles, PyPSA-Earth, files) "
-            "and write models and runs out.",
-            (
-                "list_starter_packs",
-                "build_starter_pack",
-                "import_dataset",
-                "export_model",
-            ),
-            "import export download dataset country starter pack osm demand database weather profile netcdf xlsx "
-            "workbook file pypsa-earth example 데이터 가져오기 내보내기 국가",
+            "plugins",
+            "Plugins and tab modules",
+            "Backend plugins (analysis, contribute, transform, action hooks, uploaded data files) and third-party tab modules: "
+            "list, install, run, remove.",
+            ("list_plugins", "get_plugin", "run_plugin_analysis", "list_tab_modules"),
+            "plugin tab module install uninstall upload analysis contribute transform action hook extension "
+            "플러그인 모듈 설치 확장",
             (
                 (
-                    "a runnable model for a country",
+                    "run a plugin analysis on a run",
+                    ("list_plugins", "get_plugin", "run_plugin_analysis"),
+                ),
+                (
+                    "install a plugin and use it",
                     (
-                        "list_starter_packs",
-                        "build_starter_pack",
-                        "build_starter_pack(confirm=true)",
-                        "check_model",
+                        "install_plugin",
+                        "install_plugin(confirm=true)",
+                        "get_plugin",
+                        "run_plugin_action(confirm=true)",
                     ),
                 ),
-                ("save the model to a file", ("export_workbook", "export_model")),
+                (
+                    "install a third-party tab module",
+                    (
+                        "install_tab_module",
+                        "install_tab_module(confirm=true)",
+                        "set_tab_module_enabled",
+                        "list_tab_modules",
+                    ),
+                ),
             ),
         ),
         Area(
             "session",
-            "Session, journal, plugins",
-            "Undo and journal of edits, clear session, server health and log, backend plugins and tab modules.",
-            ("get_journal", "undo_journal_entry", "list_plugins", "get_server_info"),
-            "undo journal revert history session clear server log health plugin tab module 되돌리기 이력 플러그인",
+            "Session, journal, server",
+            "Undo and journal of edits, revert, clear the session, server health and log, reload the schema, "
+            "and tool_catalogue (this routing).",
+            ("tool_catalogue", "get_journal", "undo_journal_entry", "get_server_info"),
+            "undo journal revert history session clear server log health version catalogue routing "
+            "되돌리기 이력 세션 서버 상태",
             (
                 (
                     "undo a bad edit",
@@ -355,27 +654,8 @@ AREAS: dict[str, Area] = {
                     ),
                 ),
                 (
-                    "put a composite on several buses, or keep it as a template",
-                    (
-                        "list_composite_templates",
-                        "save_composite_template",
-                        "save_composite_template(confirm=true)",
-                        "place_composite",
-                        "place_composite(confirm=true)",
-                    ),
-                ),
-                (
-                    "detach a composite into plain rows, or re-sync edited sheet rows",
-                    (
-                        "detach_composite",
-                        "detach_composite(confirm=true)",
-                        "sync_composites",
-                        "sync_composites(confirm=true)",
-                    ),
-                ),
-                (
-                    "run a plugin analysis on a run",
-                    ("list_plugins", "get_plugin", "run_plugin_analysis"),
+                    "is the server healthy and which build is it",
+                    ("get_server_info", "get_server_log"),
                 ),
             ),
         ),
@@ -384,13 +664,15 @@ AREAS: dict[str, Area] = {
 
 # Recipes quoted in the server instructions (area id, index into that area's recipes). Order = display order.
 _INSTRUCTION_RECIPES: tuple[tuple[str, int], ...] = (
+    ("data", 1),
     ("composites", 0),
-    ("composites", 1),
-    ("data", 0),
+    ("p2x", 0),
+    ("fuel_costs", 0),
     ("build", 0),
     ("time_ops", 0),
     ("transforms", 0),
     ("run", 0),
+    ("run", 2),
     ("results", 0),
     ("studies", 0),
     ("policy", 0),
@@ -453,8 +735,8 @@ def render_catalogue(tools: Iterable[Any], area: str | None = None) -> str:
     groups = tools_by_area(tools)
     if area is None:
         lines = [
-            "Ragnarok tool areas (call tool_catalogue(area=<id>) for one area's tools and recipes). "
-            "R = read-only, W+confirm = writes, preview first then confirm=true, W = writes without a confirm argument.",
+            ("Ragnarok tool areas (call tool_catalogue(area=<id>) for one area's tools and recipes). "
+            "R = read-only, W+confirm = writes, preview first then confirm=true, W = writes without a confirm argument."),
         ]
         for a in AREAS.values():
             lines.append(
@@ -502,10 +784,9 @@ _INSTRUCTIONS_HEAD = (
 )
 
 _INSTRUCTIONS_TAIL = (
-    "\n\nSolve-mode analytics: seven reliability/market studies (reserves, forced-outage Monte Carlo, ramping, "
-    "correlated sampling, ELCC, convergence sampling, LMP decomposition) ride the same solve: call "
-    "describe_analytics for their option keys, then enable them via submit_solve's options. RFNBO and co-firing "
-    "limits are run options too (describe_run_options).\n\n"
+    "\n\nStudies (adequacy, reserves, outage Monte Carlo, ELCC, LMP, merchant, PPA, ESS, company finance, stochastic ...) "
+    "ride the same solve as options: describe_studies lists each option key and result key, get_study_result reads one "
+    "study of a stored run. RFNBO and co-firing limits are run options too (describe_run_options).\n\n"
     "Physical risk has its OWN server-minted session id; every physical_risk_* tool defaults to the seeded "
     "session. Follow the climate-damage recipe above."
 )
@@ -537,8 +818,8 @@ def render_doc_block(tools: Iterable[Any]) -> str:
     out = [
         DOC_START,
         "",
-        f"The server has {len(tools)} tools in {len(AREAS)} areas "
-        "(mode: R read-only, W+confirm preview then confirm=true, W writes without confirm).",
+        (f"The server has {len(tools)} tools in {len(AREAS)} areas "
+        "(mode: R read-only, W+confirm preview then confirm=true, W writes without confirm)."),
         "",
         "| Area | Tools | Start with |",
         "|---|---|---|",

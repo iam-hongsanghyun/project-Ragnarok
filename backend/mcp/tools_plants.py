@@ -7,6 +7,7 @@ Tools:
 
 * ``list_plant_types`` - read-only: the plant types (generator, bess, ccgt, ocgt, cofiring_simple, cofiring_network, p2x),
   their fields with defaults and units, and the technology data sources.
+* ``list_plants``      - read-only: the plants in the working model (one card each: id, type, bus, capacity, components).
 * ``add_plant``        - WRITE (gated, confirm=true): build a plant (bus + capacity + a few fields) into the working model.
 * ``edit_plant``       - WRITE (gated, confirm=true): re-derive a plant's components from its stored spec plus a patch.
 * ``remove_plant``     - WRITE (gated, confirm=true): delete all of a plant's components and nothing else.
@@ -52,6 +53,38 @@ async def list_plant_types(include_technologies: bool = False) -> Any:
     out = await client._get("/api/build/plant/types")
     if include_technologies:
         out["technologies"] = await client._get("/api/build/plant/technologies")
+    return out
+
+
+_PLANT_LIST_CAP = 50
+
+
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "The plants already in the working model (발전소 목록): one card each with plantId, type (ccgt, ocgt, bess, generator, cofiring_*, p2x), label, bus, capacityMwEl, extendable, editable and a component count. "
+        "Use the plantId with edit_plant, remove_plant, detach_composite, save_composite_template and get_plant_results; list_plant_types is the catalogue of what add_plant can build. "
+        "plant_type filters by type; include_spec=true adds each plant's stored spec and include_components=true the component rows it owns (large). At most `limit` plants (default 50) are returned, "
+        "with a truncation notice that says how to narrow."
+    ),
+)
+async def list_plants(plant_type: str | None = None, include_spec: bool = False, include_components: bool = False, limit: int = _PLANT_LIST_CAP) -> Any:
+    client = get_client()
+    res = await client._get("/api/build/plants", {"session_id": client.session_id})
+    plants = [p for p in res.get("plants") or [] if not plant_type or p.get("type") == plant_type]
+    shown = plants[: max(1, int(limit))]
+    cards = []
+    for p in shown:
+        card = {k: v for k, v in p.items() if k not in ("spec", "components")}
+        card["componentCount"] = len(p.get("components") or [])
+        if include_spec:
+            card["spec"] = p.get("spec")
+        if include_components:
+            card["components"] = p.get("components")
+        cards.append(card)
+    out: dict[str, Any] = {"plants": cards, "total": len(plants), "returned": len(cards)}
+    if len(cards) < len(plants):
+        out["truncated"] = f"Showing {len(cards)} of {len(plants)} plants; narrow with plant_type, or raise limit."
     return out
 
 
@@ -213,6 +246,7 @@ async def sync_composites(confirm: bool = False) -> Any:
 
 # Tool areas (see catalogue.py).
 declare_areas({
+    "list_plants": "composites",
     "list_plant_types": "composites",
     "add_plant": "composites",
     "edit_plant": "composites",

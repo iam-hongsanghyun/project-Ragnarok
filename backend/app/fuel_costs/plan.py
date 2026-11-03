@@ -393,7 +393,8 @@ def build_stochastic_plans(network: pypsa.Network, model: dict[str, Any], config
     present = {GENERATOR: {str(n[-1]) for n in network.generators.index}, LINK: {str(n[-1]) for n in network.links.index}}
 
     def of_scenario(frames: dict[str, pd.DataFrame], name: str) -> dict[str, pd.DataFrame]:
-        return {c: f.xs(name, level="scenario", axis=1) for c, f in frames.items()}
+        # a component with no rows (a model without Links) comes back as an empty frame that has no scenario to select
+        return {c: (f.xs(name, level="scenario", axis=1) if isinstance(f.columns, pd.MultiIndex) and len(f.columns) else f) for c, f in frames.items()}
 
     plans: dict[str, FuelPlan] = {}
     problems: list[str] = []
