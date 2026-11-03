@@ -11,8 +11,9 @@ Merge rules:
 * static sheets get the new rows appended with name dedupe (existing rows win;
   colliding names get ``_2`` / ``_3`` / … and references are rewritten);
 * ``carriers`` is unioned by name, an existing carrier merged attribute-wise
-  (existing non-empty values win; a fuel-price fragment overwrites and also
-  sets ``marginal_cost = fuel_cost_thermal / efficiency`` on its generators);
+  (existing non-empty values win; a fuel-price fragment overwrites, so ``fuel_cost_thermal`` is the
+  fresh price; NO generator ``marginal_cost`` is written - the fuel-costs module turns the price
+  into ``fuel / efficiency + VOM`` at run time);
 * ``RAGNAROK_Provenance`` gains one row per fetch;
 * with ``snapshots``, the ``snapshots`` sheet becomes the sorted union and every
   temporal sheet is widened to it — ``loads-p_set`` constant-extends from the
@@ -28,7 +29,6 @@ Pure functions, stdlib only.
 from __future__ import annotations
 
 import bisect
-import math
 from typing import Any
 
 Rows = list[dict[str, Any]]
@@ -122,39 +122,6 @@ def _union_carriers(existing: Rows, incoming: Rows, overwrite: bool = False) -> 
             if overwrite or not _filled(row.get(k)):
                 row[k] = v
     return list(by_name.values()) + unnamed
-
-
-def _apply_fuel_cost(generators: Rows, carriers: Rows) -> Rows:
-    """Fuel-price fragments: generators of a priced carrier get
-    ``marginal_cost = fuel_cost_thermal / efficiency`` (blank/≤0 efficiency → 1)."""
-    thermal: dict[str, float] = {}
-    for c in carriers:
-        try:
-            t = float(c.get("fuel_cost_thermal"))
-        except (TypeError, ValueError):
-            continue
-        if (
-            isinstance(c.get("name"), str)
-            and _filled(c.get("fuel_cost_thermal"))
-            and not math.isnan(t)
-        ):
-            thermal[c["name"]] = t
-    if not thermal:
-        return generators
-    out: Rows = []
-    for g in generators:
-        t = thermal.get(g.get("carrier")) if isinstance(g.get("carrier"), str) else None
-        if t is None:
-            out.append(g)
-            continue
-        try:
-            eff = float(g["efficiency"]) if _filled(g.get("efficiency")) else 1.0
-        except (TypeError, ValueError):
-            eff = 1.0
-        if not eff > 0:
-            eff = 1.0
-        out.append({**g, "marginal_cost": round(t / eff, 4)})
-    return out
 
 
 def _index_by_snapshot(rows: Rows) -> dict[str, dict[str, Any]]:
@@ -284,10 +251,6 @@ def merge_fragment(model: Model, fragment: dict[str, Any]) -> Model:
         out[CARRIERS_SHEET] = _union_carriers(
             list(out.get(CARRIERS_SHEET) or []), sheets[CARRIERS_SHEET], fuel_prices
         )
-        if fuel_prices and isinstance(out.get("generators"), list):
-            out["generators"] = _apply_fuel_cost(
-                out["generators"], sheets[CARRIERS_SHEET]
-            )
 
     # A fragment may carry its window as a ``snapshots`` sheet instead of a list.
     if not snapshots and sheets.get(SNAPSHOTS_SHEET):

@@ -125,7 +125,8 @@ backend/
     pathway.py           PathwayConfig, parse_pathway_config
     rolling.py           RollingHorizonConfig, parse_rolling_config
     stochastic.py        shim -> app/stochastic/ (see 5.14)
-    (app/carbon_pricing/  carbon-pricing module: config.py price series, term.py objective term + results; app/annual_budgets/  annual-budgets module)
+    (app/carbon_pricing/  carbon-pricing module: config.py price series, term.py objective term + results; app/annual_budgets/  annual-budgets module;
+     app/fuel_costs/  fuel-costs module: inputs.py sheets, plan.py marginal-cost series, report.py breakdown + LCOE)
     constants.py         Carrier/generator colour utilities
     pypsa_schema.py      Schema accessors (runtime schema from pypsa_schema_builder.py; network_import_policy.json)
     network/
@@ -399,6 +400,7 @@ Processing order:
 12b. `forceLp`: nothing is cleared; a note says PyPSA relaxes the binaries (`linearized_unit_commitment`, set in `optimise_options`). A `maintainable` unit refuses the run with the visible workbook step that relaxes it.
 13. Emit a warning note for any carrier with `co2_emissions > 5` (likely entered as kg/MWh instead of tCO2/MWh).
 14. Add PyPSA's load-shedding generators if `enableLoadShedding` (§5.5).
+14b. **Fuel-costs module** (§5.15, a `build_step` hook, order 20): write `fuel / efficiency + VOM` as `generators_t.marginal_cost` / `links_t.marginal_cost` from `RAGNAROK_FuelPrices`, `RAGNAROK_VariableOM` and `carriers.fuel_cost_thermal`; a no-op for a model with none of them.
 15. Apply stochastic scenario expansion (`apply_scenarios`) if `stochasticConfig.enabled`.
 
 ### 5.2 `components.py`
@@ -871,13 +873,13 @@ module by name. A module that fails to import is skipped and listed in `module_h
 | Hook kind | Signature | Called | Used by |
 |---|---|---|---|
 | `submit` | `fn(data) -> data` | `_resolve_payload_model`, before the run is queued | `scenario_overrides` (cell overrides), `constraints` (DSL precedence), `physical_risk` (outage uplift), `p2x` (session RFNBO settings) |
-| `guard` | `fn(ctx)` | `run_pypsa`, before the build | `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
-| `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `stochastic` (scenario overrides), `market_studies` (bid + carbon price + piecewise refusal) |
+| `guard` | `fn(ctx)` | `run_pypsa`, before the build | `fuel_costs` (a priced unit without efficiency, stochastic), `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
+| `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `fuel_costs` (fuel-priced marginal-cost series), `stochastic` (scenario overrides), `market_studies` (bid + carbon price + piecewise refusal) |
 | `constraints` | `prepare(ctx) -> fn(n, snapshots) \| None` | once before the solve (a bad plan is a 400); the returned contributions are composed into the one `extra_functionality` | `carbon_pricing`, `annual_budgets`, `constraints`, `reserves`, `p2x` (RFNBO), `plants` (co-firing, start-cost tiers) |
 | `replace_solve` | `fn(ctx) -> payload \| None` | after the build; a payload ends the run | `market_studies` (rule-based market simulation) |
 | `post_solve` | `fn(ctx) -> {key: value}` | right after the solve, before the core reads the network; a module that added its own objective term appends `{label, value}` (the term at the solution) to `ctx.objective_terms`, which the cost breakdown lists | `stochastic` (collapse to a representative scenario, duals divided by the scenario probability), `plants` (start-cost tier surcharge) |
 | `diagnose` | `fn(ctx) -> {headline, text} \| None` | when a solve is unusable | `model_check` (infeasibility diagnosis) |
-| `study` | `fn(ctx) -> {key: value}` | after the core has read the network | `market_studies`, `company`, `adequacy`, `reserves`, `emissions`, `demand_response` |
+| `study` | `fn(ctx) -> {key: value}` | after the core has read the network | `fuel_costs` (`fuelCosts`), `market_studies`, `company`, `adequacy`, `reserves`, `emissions`, `demand_response` |
 
 Rules (kept in the module docstring of `module_hooks.py`): order comes from the declared `order` and the hook id, never import order; a second claim on a hook id or a
 result key is an error at declaration; every declared `payload_keys` entry is present in the payload (`None` when the study did not run); a module sees only
@@ -891,6 +893,7 @@ core-to-module import allowlist in both directions (a stale row fails), and fail
 | `stochastic/` | scenario overrides, collapse to the representative scenario, duals divided by the probability, `GlobalConstraint.mu` recovery | `set_scenarios` / `set_risk_preference` stay native |
 | `demand_response/` | shiftable and price-elastic rewiring (DR bus + Link + Store), `demandResponse` / `priceElastic` blocks | a declared, reported build step; `rows.py` writes the `dr_*` components into the workbook as visible rows (`/api/demand-response/apply`) |
 | `p2x/rfnbo.py`, `plants/cofiring.py`, `plants/startcosts.py` | RFNBO matching, co-firing blend share, hot / warm / cold start-cost tiers | `constraints` hooks of the p2x and plants modules |
+| `fuel_costs/` | fuel price series and VOM as time-varying marginal cost (`inputs.py`, `plan.py`), the fuel / VOM / carbon breakdown and ex-post LCOE (`report.py`); the `fuelCosts` block | `options.fuelCosts.enabled`; §5.15 |
 | `emissions/` | `thermal_basis_factor` (carrier `co2_emissions` / efficiency: the one factor function), `carrier_emission_factors`, `primary_energy_emissions`, `emissionsBreakdown` | `results_derived` and `run_statistics` call these |
 | `market_studies/` | market simulation, strategic bidding, merchant, bid strategy, optimal bid, PPA + explorer, price formation, LMP decomposition | study and `replace_solve` hooks |
 | `company/` | company breakdown, statement, finance, asset swap, ESS business case | study hooks |
@@ -908,6 +911,49 @@ older tests; new code imports the real module. Not moved: `forge_helpers.py` (al
 (`operational_limit`), carrier capacity limits (`tech_capacity_expansion_limit`) and a bare DSL `emissions` cap (`primary_energy`), each only when the native row is
 provably the same constraint; the kinds PyPSA has no type for (intensity, shares, capacity factors, multi-term lines) and the runs where the native row would differ
 (rolling, pathway, stochastic) keep the declared linopy constraint. The `primary_energy` / `operational_limit` rows of the workbook sheet were always native.
+
+### 5.15 `fuel_costs` — fuel price series as time-varying marginal cost
+
+**Module:** `backend/app/fuel_costs/`. PyPSA's `marginal_cost` is one number per unit, a fuel price is a series per carrier, and a thermal unit pays
+`fuel / efficiency` per MWh of electricity. The module owns that translation, visibly: inputs are model sheets, the written values are in the run notes and the
+`fuelCosts` result. Carbon is **not** in it (the carbon-pricing module adds it to the objective, §7.5) and the system marginal price is an **output**
+(`buses_t.marginal_price`); nothing here writes either.
+
+**Inputs.** `RAGNAROK_FuelPrices` (a wide temporal sheet in `timeseries.MODULE_SERIES_SHEETS`: `snapshot` + one column per fuel carrier, currency/MWh thermal; blank = no price at
+that snapshot, the unit keeps the workbook's marginal cost there and the notes say so); the carriers column `fuel_cost_thermal` (written by the fuel-price importer) acts as a
+constant series for a carrier with no column in the sheet; `RAGNAROK_VariableOM` (static rows `component` Generator | Link, `name` or `carrier`, `vom` in currency/MWh of electric
+output; a name row beats a carrier row; no row = 0 and the notes list the units).
+
+**Run-time rule** (`build_step` hook `fuel-costs`, order 20; switch `options.fuelCosts.enabled`, default on only when the model has a price sheet, a VOM sheet or a carrier
+`fuel_cost_thermal`, so a model with none is untouched):
+
+$$ mc_{g,t} = \frac{\pi^{f}_{c,t}}{\eta_{g,t}} + v_g \quad [\text{currency}/\mathrm{MWh_{el}}] $$
+
+ASCII: `marginal_cost[g,t] = fuel[c,t] / eta[g,t] + vom[g]`, written as `generators_t.marginal_cost` (η = `generators_t.efficiency` when present, else the static value).
+
+**The Link convention.** PyPSA's Link `marginal_cost` is per MW of `p0`. A Link is a fuel converter when its `bus0` carrier is not an electricity carrier (`""`, `ac`, `dc`, `electricity`,
+`elec`, `power`, as in the plants module); a Link on an electricity `bus0` (battery, interconnector, HVDC) is never fuel-priced.
+* A priced **supplier** (any Generator on `bus0` whose carrier has a price) carries the fuel: its `marginal_cost[t] = fuel(t)` per MWh thermal (efficiency 1 when none is stated),
+  and the Link gets `marginal_cost = VOM x eta` (per MWh_el: `fuel/eta + VOM`). The Link's fuel carrier is the supplier's carrier (the bus carrier decides between several; still ambiguous = left alone, reported).
+  Without a `RAGNAROK_VariableOM` row such a Link keeps its own static `marginal_cost` as its VOM (`VOM = mc / eta`, source `workbook`): its fuel is on the supplier, so that value is
+  non-fuel cost (the plants catalogue writes `vom x eta` there). A Generator has no such fallback, since its static value may hold fuel.
+* **No supplier** on `bus0` (a free source): the fuel carrier is the carrier of `bus0` (else the Link's own), and the Link gets `marginal_cost = fuel(t) + VOM x eta`.
+* Multi-output Links keep the VOM on the electric output (`bus1`, its `eta`). Storage and renewables are untouched unless a VOM row names them (then `marginal_cost = VOM`).
+* Every Generator on a fuel (non-electricity) bus is a supplier; a priced Generator on an electricity bus needs a stated `efficiency`.
+
+**Guards (HTTP 400).** A priced unit (and any Link) with a blank, non-positive or (series) non-finite efficiency: PyPSA would silently use 1 and understate the fuel cost; stochastic runs
+with module inputs; a malformed price or VOM row. Units with a piecewise `marginal_cost` curve, or a part-load `stand_by_cost`, keep their own curve and are listed in the notes. Every overridden
+unit is listed with its old -> new mean marginal cost.
+
+**Results** (`study` hook `fuel-costs`, key `fuelCosts`; `POST /api/fuel-costs/preview` and MCP `get_fuel_costs` give the same rows before a run). Per unit: the time-mean and dispatch-weighted
+fuel / VOM / carbon (`carbon_pricing.adder_frame`; a Link pays its upstream supplier's adder / eta) / other (the workbook's cost on unpriced snapshots) per MWh_el and their total, and the ex-post LCOE
+
+$$ \mathrm{LCOE}_u = \frac{K_u + F_u + \sum_t w_t\,q_{u,t}\,(c^{fuel} + v_u + c^{CO_2} + c^{other})}{\sum_t w_t\,q_{u,t}} $$
+
+ASCII: `LCOE = (capex + fom + sum_t w*q*(fuel + vom + carbon + other)) / sum_t w*q`, with `capex` + `fom` from `stat_metrics.fixed_cost_table` (PyPSA's `n.statistics.capex` / `.fom` over the
+horizon) and `w` the objective weighting; a unit with no generation has `lcoe = null`; a supplier (MWh thermal) has none. Forge slice / temporal reduction keep the price sheet aligned (`fuel_costs.inputs.realign`).
+The fuel-price importer no longer writes generator `marginal_cost` at merge time (`fragment_merge`, `mergeFragment.ts`): it only unions `fuel_cost_thermal` into the carriers.
+Tests: `test_fuel_costs.py` (analytical SMP of a switching marginal unit, carbon once, LCOE by hand).
 
 ## 6. Result extraction
 
@@ -932,6 +978,7 @@ provably the same constraint; the kinds PyPSA has no type for (intensity, shares
 | `meritOrder` | `list[dict]` | Supply stack sorted by marginal cost ascending. See [Section 6.5](#65-marketpy). |
 | `co2Shadow` | `dict` | CO2 shadow price information. See [Section 6.5](#65-marketpy). |
 | `appliedConstraints` | `list[dict]` | Custom and global constraints active during the solve. |
+| `fuelCosts` | `dict \| null` | The fuel-costs module's per-unit fuel / VOM / carbon breakdown and ex-post LCOE (`null` without inputs). See [Section 5.15](#515-fuel_costs--fuel-price-series-as-time-varying-marginal-cost). |
 | `emissionsBreakdown` | `dict` | Per-generator and per-carrier emission totals. See [Section 6.3](#63-emissionspy). |
 | `narrative` | `list[str]` | Human-readable notes accumulated throughout build and extraction. |
 | `runMeta` | `dict` | `snapshotCount`, `snapshotWeight`, `modeledHours`, `storeWeight`, `planningMode`, `investmentPeriods`; nested `rolling` dict when rolling is enabled. |

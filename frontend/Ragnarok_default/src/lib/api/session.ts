@@ -233,8 +233,9 @@ export async function getSeriesWindow(
 }
 
 /** Module-owned wide temporal sheets whose names carry no dash. Mirrors `timeseries.MODULE_SERIES_SHEETS`
- *  (backend/app/timeseries.py): `RAGNAROK_CarrierOutputCap` = snapshot + one MW cap column per carrier. */
-export const MODULE_SERIES_SHEETS: ReadonlySet<string> = new Set(['RAGNAROK_CarrierOutputCap']);
+ *  (backend/app/timeseries.py): `RAGNAROK_CarrierOutputCap` = snapshot + one MW cap column per carrier;
+ *  `RAGNAROK_FuelPrices` = snapshot + one currency/MWh_thermal price column per fuel carrier. */
+export const MODULE_SERIES_SHEETS: ReadonlySet<string> = new Set(['RAGNAROK_CarrierOutputCap', 'RAGNAROK_FuelPrices']);
 
 /** A PyPSA time-series sheet is ``<component>-<attribute>`` (e.g. generators-p_max_pu);
  *  ``snapshots`` is the time axis, treated as static. Mirrors the backend rule. */

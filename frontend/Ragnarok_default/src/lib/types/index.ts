@@ -1,3 +1,5 @@
+
+import type { FuelCostsResult } from 'lib/api/fuelCosts';
 // ── Sheet name types ──────────────────────────────────────────────────────────
 
 export type SheetName = string;
@@ -1935,6 +1937,8 @@ export interface RunResults {
   pluginAnalytics?: Record<string, PluginAnalyticsEntry>;
   /** Annual budgets the run applied (null / absent when it had none). */
   annualBudgets?: AnnualBudgetEntry[] | null;
+  /** The fuel-costs module's per-unit breakdown (fuel / VOM / carbon per MWh_el) and ex-post LCOE (null / absent without inputs). */
+  fuelCosts?: FuelCostsResult | null;
   summary: SummaryItem[];
   dispatchSeries: SeriesPoint[];
   /** Per-carrier curtailed power (MW) per snapshot — renewables (time-varying

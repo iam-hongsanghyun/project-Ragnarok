@@ -12,6 +12,9 @@ describe('isSeriesSheet', () => {
   test('a registered module sheet is a series although its name has no dash', () => {
     expect(MODULE_SERIES_SHEETS.has('RAGNAROK_CarrierOutputCap')).toBe(true);
     expect(isSeriesSheet('RAGNAROK_CarrierOutputCap')).toBe(true);
+    expect(MODULE_SERIES_SHEETS.has('RAGNAROK_FuelPrices')).toBe(true);
+    expect(isSeriesSheet('RAGNAROK_FuelPrices')).toBe(true);
+    expect(isSeriesSheet('RAGNAROK_VariableOM')).toBe(false); // a static row sheet
     expect(isSeriesSheet('RAGNAROK_CustomDSL')).toBe(false);
   });
 });

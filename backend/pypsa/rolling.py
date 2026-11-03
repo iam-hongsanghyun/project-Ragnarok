@@ -99,6 +99,11 @@ def auto_terminal_penalty(network: Any) -> float:
     gens = getattr(network, "generators", None)
     if gens is not None and len(gens) and "marginal_cost" in gens.columns:
         mc = float(max(0.0, gens["marginal_cost"].max()))
+        try:  # the cost actually charged: a series (or the fuel-costs module's fuel / efficiency + VOM) replaces the static column
+            dense = network.get_switchable_as_dense("Generator", "marginal_cost")
+            mc = float(max(0.0, dense.max().max())) if dense.shape[1] else mc
+        except Exception:  # noqa: BLE001 - a bare network stand-in: the static column stands
+            pass
     return AUTO_PENALTY_FACTOR * mc if mc > 0 else 1.0
 
 

@@ -9,10 +9,10 @@
  *    empty/missing cells are filled from the fragment — except for the
  *    fuel-price importer (`provenance.database_id === 'fuel_prices'`), whose
  *    values deliberately overwrite (the user just typed fresh prices).
- *  - Fuel-price fragments also set, for every existing generator whose
- *    `carrier` has a `fuel_cost_thermal`, `marginal_cost = fuel_cost_thermal /
- *    efficiency` (efficiency blank/<=0 -> 1). Provenance stays on the carrier
- *    row (`raw_price`, `raw_unit`, `fuel_cost_basis`) and the provenance sheet.
+ *  - Fuel-price fragments write NO generator `marginal_cost`: `fuel_cost_thermal` is
+ *    an input of the fuel-costs module, which sets `fuel / efficiency + VOM` at run
+ *    time. Provenance stays on the carrier row (`raw_price`, `raw_unit`,
+ *    `fuel_cost_basis`) and the provenance sheet.
  *  - The `RAGNAROK_Provenance` sheet picks up one new row per fetch.
  *  - When the fragment carries `snapshots`, the workbook's `snapshots` sheet
  *    is unioned with the imported range (lexical sort on ISO-`T` strings)
@@ -119,29 +119,6 @@ function unionCarriers(
     }
   }
   return [...Array.from(byName.values()), ...unnamed];
-}
-
-/** Fuel-price fragments: every generator of a priced carrier gets
- *  `marginal_cost = fuel_cost_thermal / efficiency`. */
-function applyFuelCostToGenerators(
-  generators: GridRow[],
-  carriers: Array<Record<string, unknown>>,
-): GridRow[] {
-  const thermal = new Map<string, number>();
-  for (const c of carriers) {
-    const n = typeof c.name === 'string' ? c.name : null;
-    const t = Number(c.fuel_cost_thermal);
-    if (n && isFilled(c.fuel_cost_thermal) && Number.isFinite(t)) thermal.set(n, t);
-  }
-  if (thermal.size === 0) return generators;
-  return generators.map((g) => {
-    const carrier = typeof g.carrier === 'string' ? g.carrier : '';
-    const t = thermal.get(carrier);
-    if (t === undefined) return g;
-    let eff = isFilled(g.efficiency) ? Number(g.efficiency) : 1;
-    if (!(eff > 0)) eff = 1;
-    return { ...g, marginal_cost: Math.round((t / eff) * 1e4) / 1e4 };
-  });
 }
 
 function appendProvenanceRow(existing: GridRow[], provenance: ProvenanceRow): GridRow[] {
@@ -351,12 +328,6 @@ export function mergeWorkbookFragment(
       fragment.sheets[CARRIERS_SHEET],
       fuelPrices,
     );
-    if (fuelPrices && Array.isArray(out.generators)) {
-      out.generators = applyFuelCostToGenerators(
-        out.generators as GridRow[],
-        fragment.sheets[CARRIERS_SHEET],
-      );
-    }
   }
 
   // ── Snapshots + temporal sheets ────────────────────────────────────────

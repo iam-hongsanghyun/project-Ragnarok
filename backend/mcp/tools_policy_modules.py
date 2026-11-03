@@ -3,6 +3,7 @@
 Thin wrappers over ``/api/carbon-price/*``, ``/api/annual-budgets/*`` and the scenario presets; nothing here imports ``backend.app``.
 
 * ``get_carbon_price``   - read-only: the module's per-generator adder for a price / schedule on the working model.
+* ``get_fuel_costs``     - read-only: the fuel-costs module's per-unit marginal-cost series (fuel / efficiency + VOM) with the fuel / VOM / carbon split.
 * ``set_carbon_price``   - WRITE (cheap, gated by autonomy): the scenario preset's carbonPrice / carbonPriceSchedule.
 * ``get_annual_budgets`` - read-only: the budget rows and the horizon values the module would write.
 * ``set_annual_budget``  - WRITE (cheap): add / replace one annual budget row.
@@ -27,6 +28,16 @@ async def _post(path: str, body: dict[str, Any]) -> dict[str, Any]:
     "added to the OBJECTIVE (marginal_cost is not changed). price = flat currency/tCO2; schedule = [{year, price}]."))
 async def get_carbon_price(price: float = 0.0, schedule: list[dict[str, Any]] | None = None) -> Any:
     return await _post("/api/carbon-price/preview", {"carbonPrice": price, "carbonPriceSchedule": schedule})
+
+
+@mcp.tool(annotations=_RO, description=(
+    "What the fuel-costs module would send PyPSA, without solving: per Generator / Link the marginal-cost series fuel price / efficiency + VOM "
+    "(fuel prices: sheet RAGNAROK_FuelPrices, one currency/MWh_thermal column per carrier, or carriers.fuel_cost_thermal as a constant; VOM: sheet RAGNAROK_VariableOM, "
+    "currency/MWh_el), with the fuel / VOM / carbon split per MWh_el. A Link burning a fuel with a priced supply Generator on bus0 carries VOM x efficiency; the fuel is priced on the supplier. "
+    "Carbon is an objective term, not in marginal_cost: pass price (currency/tCO2) to see it in the breakdown. A priced unit without efficiency is a 400. "
+    "The system marginal price is an output of the solve, not an input."))
+async def get_fuel_costs(price: float = 0.0, schedule: list[dict[str, Any]] | None = None) -> Any:
+    return await _post("/api/fuel-costs/preview", {"carbonPrice": price, "carbonPriceSchedule": schedule})
 
 
 @mcp.tool(annotations=_EDIT, description=(
@@ -72,6 +83,7 @@ async def apply_annual_budgets(pathway_config: dict[str, Any] | None = None, con
 # Tool areas (see catalogue.py).
 declare_areas({
     "get_carbon_price": "policy",
+    "get_fuel_costs": "policy",
     "set_carbon_price": "policy",
     "get_annual_budgets": "policy",
     "set_annual_budget": "policy",

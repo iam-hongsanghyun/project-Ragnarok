@@ -581,6 +581,32 @@ budget is split across the windows by their share of the hours; a GlobalConstrai
 If the timestamps are 4 h apart but the snapshot weighting is 1, the notes and the model check warn
 that every total is a quarter of the real one; nothing is changed for you.
 
+#### Fuel costs
+
+Fuel prices are a time series per fuel; a thermal unit pays `fuel price / efficiency + variable O&M` for each MWh of
+electricity. The fuel-costs module turns the prices into each unit's marginal cost **when the run starts**; the workbook's
+`marginal_cost` column is not rewritten. Three inputs, all visible in the workbook:
+
+* **RAGNAROK_FuelPrices** (a time-series sheet): `snapshot` plus one column per fuel carrier, in currency per MWh of
+  *thermal* energy. A blank cell means no price for that carrier at that hour; the unit keeps the marginal cost the workbook
+  has there, and the run notes say so.
+* **carriers.fuel_cost_thermal**: a constant price, used for a carrier that has no column in the price sheet. The
+  **Fuel & commodity prices** importer writes it (it no longer touches any generator).
+* **RAGNAROK_VariableOM** (a table): `component` (Generator or Link), `name` (or `carrier` for every unit of a carrier;
+  the name row wins), `vom` in currency per MWh of electricity. A unit without a row has VOM 0 and is listed in the run notes, except a CCGT-style Link whose fuel is priced on its supply generator: it keeps its own `marginal_cost` (VOM x efficiency, as the plants catalogue writes it) as its VOM.
+
+A **Link** that burns fuel (a CCGT from a gas bus to the electric bus) is priced per MWh of its input: when a fuel-supply
+generator sits on its input bus the fuel is priced there (`marginal_cost = fuel price`) and the Link carries
+`VOM x efficiency`; with no supplier the Link carries `fuel price + VOM x efficiency`. A priced unit with no efficiency is
+refused with an error, because dividing by a silent 1 understates the fuel cost. Carbon is not part of the marginal cost: the
+carbon price is added to the objective by the carbon-pricing module, and the system marginal price is a result of the run.
+Switch the module off with `options.fuelCosts.enabled = false`.
+
+**Settings > Carbon price > Fuel costs > Preview fuel costs** lists, per unit, the marginal cost the run would send and its
+fuel / VOM / carbon split per MWh, without solving. The run's **fuelCosts** result adds dispatch-weighted components and each
+unit's levelised cost over the horizon: (capex + fixed O&M from PyPSA's statistics + fuel + VOM + carbon) / generation; a unit
+that did not generate has none.
+
 #### Standard Constraints
 
 This section contains two editors side by side:

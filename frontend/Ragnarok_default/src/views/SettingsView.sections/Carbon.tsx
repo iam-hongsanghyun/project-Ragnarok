@@ -13,6 +13,7 @@ import { CarbonScenarioPicker } from 'features/carbon/CarbonScenarioPicker';
 import { cloneSchedule, createCarbonProfileId } from 'lib/results/carbonLibrary';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 import { CarbonPreviewPanel } from 'features/carbon/CarbonPreviewPanel';
+import { FuelCostsPreviewPanel } from 'features/fuelCosts/FuelCostsPreviewPanel';
 
 export interface CarbonSectionProps {
   carbonPrice: number;
@@ -242,6 +243,13 @@ export function CarbonSection(props: CarbonSectionProps) {
         <>
           <div className="sg-setting-divider" />
           <CarbonPreviewPanel
+            carbonPrice={props.carbonPrice}
+            carbonPriceSchedule={schedule}
+            currencySymbol={props.currencySymbol}
+            onSessionSync={props.onSessionSync}
+          />
+          <div className="sg-setting-divider" />
+          <FuelCostsPreviewPanel
             carbonPrice={props.carbonPrice}
             carbonPriceSchedule={schedule}
             currencySymbol={props.currencySymbol}

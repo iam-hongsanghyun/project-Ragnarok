@@ -23,7 +23,7 @@ describe('mergeWorkbookFragment carriers (RI2)', () => {
     ],
   } as unknown as WorkbookModel;
 
-  it('fuel-price fragment overwrites carrier attrs and sets generator marginal_cost = thermal / efficiency', () => {
+  it('fuel-price fragment overwrites carrier attrs and leaves generator marginal_cost alone (the fuel-costs module sets it at run time)', () => {
     const fragment = {
       sheets: { carriers: [{ name: 'gas', fuel_cost_thermal: 34.1214, raw_price: 10, co2_emissions: 0.9 }] },
       provenance: prov('fuel_prices'),
@@ -34,9 +34,9 @@ describe('mergeWorkbookFragment carriers (RI2)', () => {
     expect(gas.co2_emissions).toBe(0.9); // fuel-price importer overwrites
     expect(out.carriers).toHaveLength(1);
     const g = out.generators as Array<Record<string, unknown>>;
-    expect(g[0].marginal_cost).toBeCloseTo(68.2428, 4); // 34.1214 / 0.5
-    expect(g[1].marginal_cost).toBeCloseTo(34.1214, 4); // efficiency blank -> 1
-    expect(g[2].marginal_cost).toBe(0); // other carrier untouched
+    expect(g[0].marginal_cost).toBe(3); // untouched
+    expect(g[1].marginal_cost).toBe(1); // untouched
+    expect(g[2].marginal_cost).toBe(0); // untouched
   });
 
   it('other importers fill empty carrier cells only; existing non-empty values win', () => {

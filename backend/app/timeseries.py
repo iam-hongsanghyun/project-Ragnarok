@@ -24,7 +24,7 @@ INDEX_KEYS = ("snapshot", "name", "datetime", "period")
 #: retargeted and read as series like any ``<list>-<attr>`` sheet. One home for the list: the stores
 #: (``session_store`` / ``sqlite_store`` / ``run_store``), the fragment merge and the frontend mirror
 #: (``isSeriesSheet`` in ``lib/api/session.ts``) all read it.
-MODULE_SERIES_SHEETS = frozenset({"RAGNAROK_CarrierOutputCap"})
+MODULE_SERIES_SHEETS = frozenset({"RAGNAROK_CarrierOutputCap", "RAGNAROK_FuelPrices"})
 
 
 def is_series_sheet_name(name: str) -> bool:

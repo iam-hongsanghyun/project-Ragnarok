@@ -66,14 +66,16 @@ def test_carriers_union_and_fill_empty_attributes() -> None:
     ]
 
 
-def test_fuel_price_fragment_overwrites_and_prices_generators() -> None:
+def test_fuel_price_fragment_overwrites_carriers_and_leaves_generator_marginal_cost_alone() -> None:
     model = _model()
+    model["carriers"][0]["fuel_cost_thermal"] = 10  # a stale price: the fuel-price fragment overwrites it
     model["generators"].append(
-        {"name": "gas_eff", "bus": "b1", "carrier": "gas", "efficiency": 0.5}
+        {"name": "gas_eff", "bus": "b1", "carrier": "gas", "efficiency": 0.5, "marginal_cost": 7}
     )
     model["generators"].append(
         {"name": "w", "bus": "b1", "carrier": "wind", "marginal_cost": 0}
     )
+    before = {g["name"]: g.get("marginal_cost") for g in model["generators"]}
     frag = {
         "sheets": {
             "carriers": [
@@ -84,9 +86,10 @@ def test_fuel_price_fragment_overwrites_and_prices_generators() -> None:
     }
     out = merge_fragment(model, frag)
     assert out["carriers"][0]["co2_emissions"] == 0.25
-    mc = {g["name"]: g.get("marginal_cost") for g in out["generators"]}
-    # no efficiency → 1; efficiency 0.5 → 60; other carriers untouched
-    assert mc == {"gas": 30.0, "gas_eff": 60.0, "w": 0}
+    assert out["carriers"][0]["fuel_cost_thermal"] == 30  # the input of the fuel-costs module
+    # marginal_cost is set at run time by the fuel-costs module, never at merge time
+    assert {g["name"]: g.get("marginal_cost") for g in out["generators"]} == before
+    assert {g["name"]: g.get("efficiency") for g in out["generators"]}["gas_eff"] == 0.5
 
 
 def test_snapshots_union_and_temporal_padding() -> None:

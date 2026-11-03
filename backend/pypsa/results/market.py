@@ -164,6 +164,9 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
     # order is by what a MWh costs including carbon, as before the price left marginal_cost.
     adder = carbon_pricing.adder_frame(network)
     carbon_mean = adder.mean(axis=0) if not adder.empty else pd.Series(dtype=float)
+    # A time-varying marginal cost (a generators-marginal_cost series, or the fuel-costs module's fuel / efficiency + VOM)
+    # is ranked by its time mean; the static column is only the workbook's value.
+    mc_mean = network.get_switchable_as_dense("Generator", "marginal_cost").mean(axis=0)
     for name in network.generators.index:
         if is_shedding(name) or any(name.startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
             continue
@@ -177,7 +180,7 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
                 "name": name,
                 "carrier": carrier,
                 "bus": str(gen.get("bus", "")),
-                "marginal_cost": round(float(curve_cost.get(name, gen.get("marginal_cost", 0.0))) + float(carbon_mean.get(name, 0.0)), 2),
+                "marginal_cost": round(float(curve_cost.get(name, mc_mean.get(name, gen.get("marginal_cost", 0.0)))) + float(carbon_mean.get(name, 0.0)), 2),
                 "p_nom": round(p_nom, 1),
                 "color": generator_color(network, name),
             }

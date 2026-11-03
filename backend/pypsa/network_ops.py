@@ -46,6 +46,7 @@ def _to_model(
     ``time_axis`` says how the snapshots changed, so a module's own temporal sheet stays aligned: ``same`` (structural
     transform), ``filter`` (a slice / merge keeps a subset of the labels) or ``blocks`` (a temporal reduction).
     """
+    from ..app import fuel_costs
     from ..app.constraints import carrier_output_cap as coc
     from ..app.routers.transforms import _preserved_config_sheets
 
@@ -56,6 +57,11 @@ def _to_model(
         labels = [str(r.get("snapshot", "")) for r in reduced.get("snapshots", [])]
         if isinstance(network.snapshots, pd.DatetimeIndex):
             reduced[coc.SHEET] = coc.realign(reduced[coc.SHEET], labels, network.snapshots, mode=time_axis)
+    if time_axis != "same" and reduced.get(fuel_costs.SHEET_PRICES):
+        labels = [str(r.get("snapshot", "")) for r in reduced.get("snapshots", [])]
+        if isinstance(network.snapshots, pd.DatetimeIndex):
+            reduced[fuel_costs.SHEET_PRICES] = fuel_costs.inputs.realign(
+                reduced[fuel_costs.SHEET_PRICES], labels, network.snapshots, mode=time_axis)
     return reduced
 
 

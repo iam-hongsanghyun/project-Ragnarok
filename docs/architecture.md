@@ -734,6 +734,9 @@ send it to PyPSA as visible inputs in the workbook. Workbook columns carry PyPSA
     `options.carbonPricing.enabled`); fuel cost is `n.statistics.opex`, carbon cost is the term at the solution.
   * `backend/app/annual_budgets/`: yearly `e_sum` / GlobalConstraint budgets (`RAGNAROK_AnnualBudgets`) written as `annual × Σw / 8760`
     into the PyPSA column, visibly; Settings → Policy → Annual budgets.
+  * `backend/app/fuel_costs/`: fuel price series (`RAGNAROK_FuelPrices`, `carriers.fuel_cost_thermal`) and VOM (`RAGNAROK_VariableOM`) written at run time as
+    `generators_t.marginal_cost` / `links_t.marginal_cost` (`fuel / η + VOM`; a Link with a supplier carries `VOM × η`), run option `options.fuelCosts.enabled`;
+    results `fuelCosts` (fuel / VOM / carbon split, ex-post LCOE); the importer and the merge step no longer write `marginal_cost`.
 * **Modules that send PyPSA what it counts in snapshots (steps 4 and 5)** (`docs/backend.md` §5.13). PyPSA weights costs, energy, `e_sum`, storage, maintenance, Link / Process delay,
   load shedding, multi-period years and all statistics by the snapshot weightings, and counts snapshots in ramps, UC times and the rolling window; core passes the weights through and:
   * **resolution** is the Forge temporal transform (resample = block means, downsample = PyPSA's point sampling): it writes snapshots, weightings and series into the workbook; the Run dialog's

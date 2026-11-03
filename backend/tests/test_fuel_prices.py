@@ -10,7 +10,6 @@ import pytest
 from backend.app.importers.databases.fuel_prices import (
     MMBTU_PER_MWH,
     convert_fuel_prices,
-    electric_marginal_cost,
 )
 from backend.app.importers.registry import registered_databases
 
@@ -47,10 +46,8 @@ def test_registered_and_global() -> None:
     assert dbs["fuel_prices"].meta.targets == ["carriers"]
 
 
-def test_electric_marginal_cost_divides_by_efficiency() -> None:
+def test_importer_rows_carry_the_thermal_price_and_no_marginal_cost() -> None:
     gas = next(r for r in convert_fuel_prices({"gas_price": 10.0}) if r["name"] == "gas")
-    # 10 $/MMBtu -> 34.1214 $/MWh_th; at 50 % efficiency -> 68.2428 $/MWh_e
-    assert electric_marginal_cost(gas["fuel_cost_thermal"], 0.5) == pytest.approx(68.2428, abs=1e-3)
+    # 10 $/MMBtu -> 34.1214 $/MWh_th: the INPUT of the fuel-costs module (marginal_cost = fuel / efficiency + VOM is made at run time)
+    assert gas["fuel_cost_thermal"] == pytest.approx(34.1214, abs=1e-4)
     assert "marginal_cost" not in gas  # not a PyPSA carriers attribute
-    for bad in (None, "", 0, -1, float("nan"), "x"):
-        assert electric_marginal_cost(34.0, bad) == pytest.approx(34.0)
