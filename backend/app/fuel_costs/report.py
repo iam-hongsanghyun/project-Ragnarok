@@ -70,6 +70,13 @@ def _wmean(x: pd.Series, w: pd.Series, mask: pd.Series | None = None) -> float |
     return float((x * w).sum() / tot) if tot > _TINY else None
 
 
+def _flat(frame: pd.DataFrame) -> pd.DataFrame:
+    """A component's static frame without the scenario level (topology is the same in every scenario)."""
+    if isinstance(frame.index, pd.MultiIndex) and "scenario" in (frame.index.names or []) and len(frame):
+        return frame.xs(frame.index.get_level_values("scenario")[0], level="scenario")
+    return frame
+
+
 def _carbon_source(network: pypsa.Network, plan: FuelPlan, unit: AppliedUnit, adder: pd.DataFrame) -> str | None:
     """The generator whose carbon adder this unit pays: itself, or for a Link the emitting supplier on ``bus0``."""
     s = unit.spec
@@ -78,8 +85,8 @@ def _carbon_source(network: pypsa.Network, plan: FuelPlan, unit: AppliedUnit, ad
     for name in s.suppliers:
         if name in adder.columns:
             return name
-    bus0 = str(network.links.at[s.name, "bus0"])
-    gens = network.generators
+    bus0 = str(_flat(network.links).at[s.name, "bus0"])
+    gens = _flat(network.generators)
     for name in gens.index[gens["bus"] == bus0]:
         if name in adder.columns:
             return str(name)
@@ -122,26 +129,32 @@ def components(network: pypsa.Network, plan: FuelPlan, unit: AppliedUnit, adder:
     return out
 
 
-def _output_mw(network: pypsa.Network, unit: AppliedUnit) -> pd.Series:
-    """The unit's output (MW): Generator ``p``; Link electric output ``-p1``; zero when it has no solution."""
+def _output_mw(network: pypsa.Network, unit: AppliedUnit, scenario: str | None = None) -> pd.Series:
+    """The unit's output (MW): Generator ``p``; Link electric output ``-p1``; zero when it has no solution.
+    ``scenario`` picks the ``(scenario, name)`` column of a stochastic network."""
     idx = unit.mc_new.index
     s = unit.spec
+    key: Any = (scenario, s.name) if scenario is not None else s.name
     if s.component == GENERATOR:
         frame = network.generators_t.p
-        col = frame[s.name] if s.name in frame.columns else None
+        col = frame[key] if key in frame.columns else None
         return col.reindex(idx).fillna(0.0).astype(float) if col is not None else pd.Series(0.0, index=idx)
     frame = network.links_t.p1
-    col = frame[s.name] if s.name in frame.columns else None
+    col = frame[key] if key in frame.columns else None
     return (-col).reindex(idx).fillna(0.0).astype(float) if col is not None else pd.Series(0.0, index=idx)
 
 
-def _fixed_costs(network: pypsa.Network) -> pd.DataFrame:
+def _fixed_costs(network: pypsa.Network, scenario: str | None = None) -> pd.DataFrame:
+    """``(component, name)`` -> capex / fom over the horizon; in a stochastic network the ``scenario`` slice of PyPSA's table."""
     from ...pypsa.results.stat_metrics import fixed_cost_table
 
     try:
-        return fixed_cost_table(network, ["Generator", "Link"])
+        table = fixed_cost_table(network, ["Generator", "Link"])
     except Exception:  # noqa: BLE001 - an unsolved network has no statistics: no fixed cost to add
         return pd.DataFrame()
+    if scenario is not None and isinstance(table.index, pd.MultiIndex) and table.index.nlevels == 3:
+        table = table.xs(scenario, level=1)
+    return table
 
 
 def _weights(network: pypsa.Network) -> pd.Series:
@@ -159,6 +172,7 @@ def unit_row(
     *,
     solved: bool,
     fixed: pd.DataFrame | None = None,
+    scenario: str | None = None,
 ) -> dict[str, Any]:
     """One unit's row of the preview (``solved=False``) or of the results (``solved=True``: adds dispatch-weighted
     components, generation and LCOE)."""
@@ -182,7 +196,7 @@ def unit_row(
     }
     if not solved:
         return row
-    q = _output_mw(network, unit)
+    q = _output_mw(network, unit, scenario)
     wq = weights * q
     row["dispatchWeighted"] = {c: _r(_wmean(comp[c].fillna(0.0), wq, priced)) for c in cols}
     generation = float(wq.sum())
@@ -204,12 +218,17 @@ def unit_row(
     return row
 
 
-def unit_rows(network: pypsa.Network, plan: FuelPlan, *, solved: bool) -> list[dict[str, Any]]:
-    """Rows for every unit of the plan (carbon from the carbon-pricing plan recorded on ``network``)."""
+def unit_rows(network: pypsa.Network, plan: FuelPlan, *, solved: bool, scenario: str | None = None) -> list[dict[str, Any]]:
+    """Rows for every unit of the plan (carbon from the carbon-pricing plan recorded on ``network``).
+
+    ``scenario`` reads one scenario of a stochastic network: its dispatch, its carbon adder (the carbon-pricing module's
+    ``adder_frame`` keeps the ``(scenario, name)`` columns) and its slice of the fixed costs; ``plan`` is that scenario's plan."""
     adder = carbon_pricing.adder_frame(network)
+    if scenario is not None and isinstance(adder.columns, pd.MultiIndex) and len(adder.columns):
+        adder = adder.xs(scenario, level="scenario", axis=1)
     weights = _weights(network)
-    fixed = _fixed_costs(network) if solved else None
-    return [unit_row(network, plan, u, adder, weights, solved=solved, fixed=fixed) for u in plan.units]
+    fixed = _fixed_costs(network, scenario) if solved else None
+    return [unit_row(network, plan, u, adder, weights, solved=solved, fixed=fixed, scenario=scenario) for u in plan.units]
 
 
 def preview(network: pypsa.Network, plan: FuelPlan) -> dict[str, Any]:
@@ -226,16 +245,62 @@ def preview(network: pypsa.Network, plan: FuelPlan) -> dict[str, Any]:
     }
 
 
-def results(network: pypsa.Network, plan: FuelPlan, currency: str) -> dict[str, Any]:
-    """The study payload ``fuelCosts``: per-unit breakdown, dispatch-weighted components and ex-post LCOE."""
+def results(network: pypsa.Network, plan: FuelPlan, currency: str, units: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The study payload ``fuelCosts``: per-unit breakdown, dispatch-weighted components and ex-post LCOE.
+    ``units`` are rows already read (the representative scenario of a stochastic run, read before the collapse)."""
     cfg = carbon_pricing.plan_of(network)
     return {
         "enabled": True,
         "currency": currency,
         "carbonPriceActive": bool(cfg is not None and cfg.is_active),
-        "units": unit_rows(network, plan, solved=True),
+        "units": units if units is not None else unit_rows(network, plan, solved=True),
         "priceSources": dict(plan.prices.source),
         "notes": list(plan.notes),
         "smp": SMP_REFERENCE,
         "weighting": "objective snapshot weighting (hours) x investment-period objective weighting (pathway)",
     }
+
+
+# ── stochastic runs ─────────────────────────────────────────────────────────────────
+
+def _expect(items: list[tuple[float, Any]]) -> Any:
+    """Probability-weighted mean of parallel structures: numbers are averaged over the scenarios where they exist (the weights
+    renormalised), dicts key by key; anything else is taken from the first scenario."""
+    vals = [(w, v) for w, v in items if v is not None]
+    if not vals:
+        return None
+    first = vals[0][1]
+    if isinstance(first, bool) or not isinstance(first, (int, float, dict)):
+        return first
+    if isinstance(first, dict):
+        keys: list[str] = []
+        for _, v in vals:
+            keys += [k for k in v if k not in keys]
+        return {k: _expect([(w, v.get(k)) for w, v in vals if isinstance(v, dict)]) for k in keys}
+    total = sum(w for w, _ in vals)
+    return _r(sum(w * float(v) for w, v in vals) / total) if total > 0 else None
+
+
+def stochastic_results(network: pypsa.Network, plans: dict[str, FuelPlan], weights: dict[str, float], representative: str) -> dict[str, Any]:
+    """Per-scenario unit rows (breakdown, dispatch-weighted components, LCOE) of a SOLVED stochastic network, read before it is
+    collapsed to one scenario, and their probability-weighted expectation. Keys ``scenarios`` / ``expected``.
+
+    ``expected`` is the probability-weighted mean of each scenario's number (an LCOE is the mean of the scenarios' LCOEs, a
+    scenario in which the unit did not run contributes nothing to its LCOE and the remaining weights are renormalised).
+    """
+    scenarios = []
+    for name, plan in plans.items():
+        scenarios.append({"name": name, "weight": float(weights.get(name, 0.0)), "units": unit_rows(network, plan, solved=True, scenario=name)})
+    by_unit: dict[tuple[str, str], list[tuple[float, Any]]] = {}
+    for sc in scenarios:
+        for row in sc["units"]:
+            by_unit.setdefault((row["component"], row["name"]), []).append((sc["weight"], row))
+    expected = [_expect(items) for items in by_unit.values()]
+    return {"representativeScenario": representative, "scenarios": scenarios, "expected": {"units": expected,
+            "basis": "probability-weighted mean over the scenarios of each per-scenario figure"}}
+
+
+def stochastic_preview(network: pypsa.Network, plans: dict[str, FuelPlan], weights: dict[str, float]) -> list[dict[str, Any]]:
+    """Per scenario the preview rows of a (stochastic, unsolved) network."""
+    return [{"name": n, "weight": float(weights.get(n, 0.0)), "units": unit_rows(network, p, solved=False, scenario=n), "notes": list(p.notes)}
+            for n, p in plans.items()]

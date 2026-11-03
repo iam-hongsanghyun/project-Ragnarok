@@ -873,8 +873,8 @@ module by name. A module that fails to import is skipped and listed in `module_h
 | Hook kind | Signature | Called | Used by |
 |---|---|---|---|
 | `submit` | `fn(data) -> data` | `_resolve_payload_model`, before the run is queued | `scenario_overrides` (cell overrides), `constraints` (DSL precedence), `physical_risk` (outage uplift), `p2x` (session RFNBO settings) |
-| `guard` | `fn(ctx)` | `run_pypsa`, before the build | `fuel_costs` (a priced unit without efficiency, stochastic), `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
-| `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `fuel_costs` (fuel-priced marginal-cost series), `stochastic` (scenario overrides), `market_studies` (bid + carbon price + piecewise refusal) |
+| `guard` | `fn(ctx)` | `run_pypsa`, before the build | `fuel_costs` (a priced unit without efficiency; a stochastic `marginal_cost` override of a priced unit), `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
+| `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `fuel_costs` (fuel-priced marginal-cost series, order 20; per-scenario series after the broadcast, order 95), `stochastic` (scenario overrides, order 90), `market_studies` (bid + carbon price + piecewise refusal) |
 | `constraints` | `prepare(ctx) -> fn(n, snapshots) \| None` | once before the solve (a bad plan is a 400); the returned contributions are composed into the one `extra_functionality` | `carbon_pricing`, `annual_budgets`, `constraints`, `reserves`, `p2x` (RFNBO), `plants` (co-firing, start-cost tiers) |
 | `replace_solve` | `fn(ctx) -> payload \| None` | after the build; a payload ends the run | `market_studies` (rule-based market simulation) |
 | `post_solve` | `fn(ctx) -> {key: value}` | right after the solve, before the core reads the network; a module that added its own objective term appends `{label, value}` (the term at the solution) to `ctx.objective_terms`, which the cost breakdown lists | `stochastic` (collapse to a representative scenario, duals divided by the scenario probability), `plants` (start-cost tier surcharge) |
@@ -941,8 +941,8 @@ ASCII: `marginal_cost[g,t] = fuel[c,t] / eta[g,t] + vom[g]`, written as `generat
 * Multi-output Links keep the VOM on the electric output (`bus1`, its `eta`). Storage and renewables are untouched unless a VOM row names them (then `marginal_cost = VOM`).
 * Every Generator on a fuel (non-electricity) bus is a supplier; a priced Generator on an electricity bus needs a stated `efficiency`.
 
-**Guards (HTTP 400).** A priced unit (and any Link) with a blank, non-positive or (series) non-finite efficiency: PyPSA would silently use 1 and understate the fuel cost; stochastic runs
-with module inputs; a malformed price or VOM row. Units with a piecewise `marginal_cost` curve, or a part-load `stand_by_cost`, keep their own curve and are listed in the notes. Every overridden
+**Guards (HTTP 400).** A priced unit (and any Link) with a blank, non-positive or (series) non-finite efficiency: PyPSA would silently use 1 and understate the fuel cost (in a stochastic run
+also an efficiency override that leaves a scenario with none, naming the scenario); a stochastic `marginal_cost` override of a unit the module prices (see below); a malformed price, VOM or scenario row. Units with a piecewise `marginal_cost` curve, or a part-load `stand_by_cost`, keep their own curve and are listed in the notes. Every overridden
 unit is listed with its old -> new mean marginal cost.
 
 **Results** (`study` hook `fuel-costs`, key `fuelCosts`; `POST /api/fuel-costs/preview` and MCP `get_fuel_costs` give the same rows before a run). Per unit: the time-mean and dispatch-weighted
@@ -953,7 +953,23 @@ $$ \mathrm{LCOE}_u = \frac{K_u + F_u + \sum_t w_t\,q_{u,t}\,(c^{fuel} + v_u + c^
 ASCII: `LCOE = (capex + fom + sum_t w*q*(fuel + vom + carbon + other)) / sum_t w*q`, with `capex` + `fom` from `stat_metrics.fixed_cost_table` (PyPSA's `n.statistics.capex` / `.fom` over the
 horizon) and `w` the objective weighting; a unit with no generation has `lcoe = null`; a supplier (MWh thermal) has none. Forge slice / temporal reduction keep the price sheet aligned (`fuel_costs.inputs.realign`).
 The fuel-price importer no longer writes generator `marginal_cost` at merge time (`fragment_merge`, `mergeFragment.ts`): it only unions `fuel_cost_thermal` into the carriers.
-Tests: `test_fuel_costs.py` (analytical SMP of a switching marginal unit, carbon once, LCOE by hand).
+**Stochastic runs.** The module is computed AFTER the scenarios exist: the `fuel-costs` build step (order 20) does nothing in a stochastic run; `fuel-costs-stochastic` (order 95, after `stochastic-overrides`
+at 90) writes `(scenario, name)` series, so scenario `S` gets `mc_S = fuel_S(t) / eta_S(t) + VOM` with `eta_S` that scenario's efficiency after its overrides (static or series) and its own workbook cost where a unit is left
+alone. The deterministic path is unchanged. Scenario fuel prices, applied in this order to the base series (`RAGNAROK_FuelPrices` / `fuel_cost_thermal`):
+1. `RAGNAROK_FuelPriceScenarios` rows `{scenario, carrier, snapshot (blank = all), price | multiplier}` (price replaces, then the multiplier scales; a blank base price stays blank under a multiplier). It is a second, LONG, static sheet, not a
+   `scenario` column in `RAGNAROK_FuelPrices`: a key column would repeat the `snapshot` labels and put a text column among the values, which the wide-sheet contract (unique `snapshot` key, numeric columns: windowing, `merge_series_sheets`,
+   Forge realign, transforms) does not allow. Rows are ignored (with a note) in a run that is not stochastic.
+2. stochastic override rows `carriers.fuel_price` (scope `name` / `carrier` = the carrier, or `all`; `multiply` | `set`), the same mechanism as every other override (`stochastic/scenarios.py` skips them in `apply_scenarios`; the module reads them).
+   They scale the fuel term only: neither the VOM nor the static `marginal_cost`.
+
+An `efficiency` override is honoured. A `marginal_cost` override whose scope reaches a unit the module prices (generators or links, by name, carrier or all rows) is **refused with HTTP 400** naming the scenario and unit (guard and build): the
+module writes that cost itself, so the override would scale the VOM too or be overwritten silently; the supported equivalents are the fuel-price rows above. Overrides of units the module does not touch (a wind farm) are unaffected.
+
+*Results.* `post_solve` hook `fuel-costs-capture` (order 5, before `stochastic-collapse` at 10) reads every scenario while the network still has them (dispatch, carbon via `carbon_pricing.adder_frame` per scenario, PyPSA's fixed-cost
+table per scenario); the study then returns `fuelCosts.units` (the representative = highest-probability scenario, named in `fuelCosts.representativeScenario`), `fuelCosts.scenarios` (`[{name, weight, units}]`) and `fuelCosts.expected`
+(each per-scenario figure averaged with the scenario probabilities; a scenario in which a unit did not run contributes nothing to its LCOE and the other weights are renormalised). The preview takes `stochasticConfig` and adds
+`scenarios` (each scenario's own marginal-cost series and breakdown).
+Tests: `test_fuel_costs.py` (analytical SMP of a switching marginal unit, carbon once, LCOE by hand; two scenarios with weights: per-scenario SMP, VOM not scaled, efficiency override, refused `marginal_cost` override, expected values).
 
 ## 6. Result extraction
 
@@ -1213,7 +1229,11 @@ nothing is rescaled. Scenarios with empty names or non-positive weights are skip
 Calls `network.set_scenarios({name: weight})` to expand all static and dynamic
 frames to a `(scenario, name)` MultiIndex, then applies per-scenario overrides
 via `_apply_advanced_override`. Must run after all deterministic setup so the
-scenario dimension broadcasts over final values.
+scenario dimension broadcasts over final values. An override with sheet `carriers` and attribute `fuel_price` is not a PyPSA
+attribute: it is skipped here and read by the fuel-costs module (§5.15), which scales the FUEL term of a carrier's price
+(not the VOM). Fuel price x 2 for gas is therefore `{sheet: carriers, attribute: fuel_price, scope: name, scope_value: gas,
+op: multiply, value: 2}`; the same on `generators.marginal_cost` would scale the VOM too and is refused (HTTP 400) for a unit
+the fuel-costs module prices.
 
 **`per_scenario_summaries(network, config, emissions_factors, currency_symbol)`**
 

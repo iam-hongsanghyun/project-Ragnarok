@@ -35,9 +35,10 @@ async def get_carbon_price(price: float = 0.0, schedule: list[dict[str, Any]] | 
     "(fuel prices: sheet RAGNAROK_FuelPrices, one currency/MWh_thermal column per carrier, or carriers.fuel_cost_thermal as a constant; VOM: sheet RAGNAROK_VariableOM, "
     "currency/MWh_el), with the fuel / VOM / carbon split per MWh_el. A Link burning a fuel with a priced supply Generator on bus0 carries VOM x efficiency; the fuel is priced on the supplier. "
     "Carbon is an objective term, not in marginal_cost: pass price (currency/tCO2) to see it in the breakdown. A priced unit without efficiency is a 400. "
-    "The system marginal price is an output of the solve, not an input."))
-async def get_fuel_costs(price: float = 0.0, schedule: list[dict[str, Any]] | None = None) -> Any:
-    return await _post("/api/fuel-costs/preview", {"carbonPrice": price, "carbonPriceSchedule": schedule})
+    "The system marginal price is an output of the solve, not an input. stochastic_config (options.stochasticConfig) adds each scenario's own series: scenario fuel prices from "
+    "RAGNAROK_FuelPriceScenarios or override rows (sheet carriers, attribute fuel_price), efficiency overrides honoured, marginal_cost overrides of priced units refused."))
+async def get_fuel_costs(price: float = 0.0, schedule: list[dict[str, Any]] | None = None, stochastic_config: dict[str, Any] | None = None) -> Any:
+    return await _post("/api/fuel-costs/preview", {"carbonPrice": price, "carbonPriceSchedule": schedule, "stochasticConfig": stochastic_config})
 
 
 @mcp.tool(annotations=_EDIT, description=(

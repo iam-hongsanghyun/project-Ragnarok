@@ -33,6 +33,9 @@ export interface FuelCostUnit {
   lcoe?: (FuelCostParts & { value: number | null; capex: number | null; fom: number | null }) | null;
 }
 
+/** One scenario of a stochastic preview: its own units (fuel price, efficiency and overrides of that scenario). */
+export interface FuelCostScenario { name: string; weight: number; units: FuelCostUnit[]; notes?: string[] }
+
 export interface FuelCostsPreview {
   active: boolean;
   carbonPriceActive: boolean;
@@ -42,11 +45,17 @@ export interface FuelCostsPreview {
   basis: string;
   inputs?: { priceSheet: string; vomSheet: string; flatColumn: string };
   smp: { source: string; note: string };
+  /** Present when the request carried an enabled stochastic config. */
+  scenarios?: FuelCostScenario[] | null;
 }
 
 /** `result.fuelCosts` of a run: the preview rows plus dispatch-weighted components, generation and LCOE. */
-export interface FuelCostsResult extends Omit<FuelCostsPreview, 'active' | 'basis' | 'inputs'> {
+export interface FuelCostsResult extends Omit<FuelCostsPreview, 'active' | 'basis' | 'inputs' | 'scenarios'> {
   enabled: boolean;
+  /** Stochastic run: `units` are this scenario's; `scenarios` / `expected` carry every scenario and the probability-weighted mean. */
+  representativeScenario?: string;
+  scenarios?: FuelCostScenario[];
+  expected?: { units: FuelCostUnit[]; basis: string };
   currency: string;
   weighting: string;
 }
@@ -55,10 +64,11 @@ export async function previewFuelCosts(
   carbonPrice: number,
   carbonPriceSchedule: { year: number; price: number }[],
   sessionId = 'default',
+  stochasticConfig?: unknown,
 ): Promise<FuelCostsPreview> {
   const resp = await fetch(`${API_BASE}/api/fuel-costs/preview`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, carbonPrice, carbonPriceSchedule }),
+    body: JSON.stringify({ sessionId, carbonPrice, carbonPriceSchedule, ...(stochasticConfig ? { stochasticConfig } : {}) }),
   });
   if (!resp.ok) {
     let detail = resp.statusText;

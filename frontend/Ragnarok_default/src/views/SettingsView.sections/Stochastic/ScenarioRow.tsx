@@ -24,13 +24,19 @@ const SCENARIO_INVARIANT_ATTR =
 export const isScenarioInvariantAttribute = (attribute: string): boolean =>
   SCENARIO_INVARIANT_ATTR.test(attribute);
 
+/** `carriers.fuel_price` is not a PyPSA attribute: the fuel-costs module reads it (a multiplier or a value on a carrier's
+ *  fuel price, applied to the fuel term only; the VOM is not scaled). */
+const FUEL_PRICE_SHEET = 'carriers';
+const FUEL_PRICE_ATTRIBUTE = 'fuel_price';
+
 const overridableAttributes = (sheet: string | undefined): string[] =>
-  (PYPSA_COMPONENTS.find((c) => c.sheet_name === sheet)?.input_static_attributes ?? [])
+  sheet === FUEL_PRICE_SHEET ? [FUEL_PRICE_ATTRIBUTE] : (PYPSA_COMPONENTS.find((c) => c.sheet_name === sheet)?.input_static_attributes ?? [])
     .filter((a) => !isScenarioInvariantAttribute(a));
 
 const OVERRIDABLE_SHEETS = PYPSA_COMPONENTS
   .filter((c) => !['snapshots', 'network', 'carriers'].includes(c.sheet_name) && overridableAttributes(c.sheet_name).length > 0)
-  .map((c) => c.sheet_name);
+  .map((c) => c.sheet_name)
+  .concat([FUEL_PRICE_SHEET]);
 
 interface Props {
   scenario: StochasticScenarioConfig;
@@ -106,7 +112,7 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
             {scenario.overrides.map((o) => {
               const attrOptions = overridableAttributes(o.sheet);
               const sheetRows = (model[o.sheet] ?? []) as Array<Record<string, unknown>>;
-              const matchOptions = o.scopeType === 'name'
+              const matchOptions = o.scopeType === 'name' || (o.scopeType === 'carrier' && o.sheet === FUEL_PRICE_SHEET)
                 ? Array.from(new Set(sheetRows.map((r) => String(r.name ?? '').trim()).filter(Boolean)))
                 : o.scopeType === 'carrier'
                   ? Array.from(new Set(sheetRows.map((r) => String(r.carrier ?? '').trim()).filter(Boolean)))

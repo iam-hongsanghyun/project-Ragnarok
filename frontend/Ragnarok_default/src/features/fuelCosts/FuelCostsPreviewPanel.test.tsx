@@ -26,6 +26,22 @@ const result: FuelCostsPreview = {
 };
 
 describe('FuelCostsPreviewPanel', () => {
+  it('sends an enabled stochastic config and lists each scenario\'s mean marginal cost', async () => {
+    const withScenarios: FuelCostsPreview = { ...result, scenarios: [
+      { name: 'low', weight: 0.6, units: [{ ...result.units[0], marginalCost: { ...result.units[0].marginalCost, newMean: 41 } }] },
+      { name: 'high', weight: 0.4, units: [{ ...result.units[0], marginalCost: { ...result.units[0].marginalCost, newMean: 123 } }] },
+    ] };
+    mockPreview.mockResolvedValueOnce(withScenarios);
+    const cfg = { enabled: true, scenarios: [] };
+    mounted = await mount(<FuelCostsPreviewPanel carbonPrice={0} carbonPriceSchedule={[]} currencySymbol="$" stochasticConfig={cfg} onSessionSync={async () => {}} />);
+    await click(button(mounted.container, 'Preview fuel costs'));
+    expect(mockPreview).toHaveBeenCalledWith(0, [], 'default', cfg);
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('low (p=0.6)');
+    expect(text).toContain('41.00');
+    expect(text).toContain('123.00');
+  });
+
   it('syncs the model, previews with the run\'s carbon setting and lists the breakdown', async () => {
     mockPreview.mockResolvedValueOnce(result);
     const onSessionSync = jest.fn(async () => {});
@@ -33,7 +49,7 @@ describe('FuelCostsPreviewPanel', () => {
     expect(mounted.container.textContent).toContain('RAGNAROK_FuelPrices');
     await click(button(mounted.container, 'Preview fuel costs'));
     expect(onSessionSync).toHaveBeenCalled();
-    expect(mockPreview).toHaveBeenCalledWith(50, []);
+    expect(mockPreview).toHaveBeenCalledWith(50, [], 'default', undefined);
     const text = mounted.container.textContent ?? '';
     expect(text).toContain('coal');
     expect(text).toContain('75.00');

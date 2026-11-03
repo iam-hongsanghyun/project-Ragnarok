@@ -6,7 +6,7 @@
  * project (see lib/results/carbonLibrary).
  */
 import React, { useRef, useState } from 'react';
-import { CarbonPriceScheduleEntry, CarbonScheduleProfile } from 'lib/types';
+import { CarbonPriceScheduleEntry, CarbonScheduleProfile, StochasticConfig } from 'lib/types';
 import { SETTINGS_CONFIG } from 'lib/constants';
 import { CarbonScheduleChart } from 'features/carbon/CarbonScheduleChart';
 import { CarbonScenarioPicker } from 'features/carbon/CarbonScenarioPicker';
@@ -24,6 +24,8 @@ export interface CarbonSectionProps {
   onCarbonLibraryChange: (next: CarbonScheduleProfile[]) => void;
   carbonCheck: { emittingGenerators: number; hasCo2Column: boolean; totalGenerators: number };
   currencySymbol: string;
+  /** The run's stochastic setting: when enabled, the fuel-costs preview adds each scenario's own marginal cost. */
+  stochasticConfig?: StochasticConfig;
   /** Push the working model to the session; the server-side preview reads the session. */
   onSessionSync?: () => Promise<void>;
 }
@@ -253,6 +255,7 @@ export function CarbonSection(props: CarbonSectionProps) {
             carbonPrice={props.carbonPrice}
             carbonPriceSchedule={schedule}
             currencySymbol={props.currencySymbol}
+            stochasticConfig={props.stochasticConfig}
             onSessionSync={props.onSessionSync}
           />
         </>

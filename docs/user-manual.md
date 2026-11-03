@@ -602,6 +602,13 @@ refused with an error, because dividing by a silent 1 understates the fuel cost.
 carbon price is added to the objective by the carbon-pricing module, and the system marginal price is a result of the run.
 Switch the module off with `options.fuelCosts.enabled = false`.
 
+*Stochastic runs.* Each scenario gets its own series, `fuel price / efficiency + VOM` with the scenario's own fuel price and
+efficiency. Scenario fuel prices come from the table **RAGNAROK_FuelPriceScenarios** (`scenario`, `carrier`, `snapshot` blank
+for all hours, `price` or `multiplier`; it is a separate table because the price sheet is one row per snapshot) or from stochastic
+override rows (`carriers.fuel_price`, see Stochastic above). The results then show `fuelCosts.scenarios` (each scenario's breakdown
+and LCOE), `fuelCosts.expected` (probability-weighted means) and, as the main rows, the highest-probability scenario, named in
+`representativeScenario`. The preview shows each scenario's mean marginal cost.
+
 **Settings > Carbon price > Fuel costs > Preview fuel costs** lists, per unit, the marginal cost the run would send and its
 fuel / VOM / carbon split per MWh, without solving. The run's **fuelCosts** result adds dispatch-weighted components and each
 unit's levelised cost over the horizon: (capex + fixed O&M from PyPSA's statistics + fuel + VOM + carbon) / generation; a unit
@@ -693,7 +700,7 @@ Each scenario row has:
 |---|---|
 | Name | A label for the scenario (e.g. `high_demand`, `low_wind`). |
 | Weight | Relative probability weight. Weights are normalized to sum to 1 at solve time. |
-| Advanced overrides | Per-cell value overrides for any sheet column (for creating variant input data per scenario). |
+| Advanced overrides | Per-cell value overrides for any sheet column (for creating variant input data per scenario). To change a **fuel price** in one scenario choose sheet `carriers`, attribute `fuel_price`, scope by carrier name, `multiply` (or `set`): it scales the fuel term of the fuel-costs module only (not the variable O&M). A `marginal_cost` override of a unit that module prices is refused with an error naming the scenario; use the fuel price instead. `efficiency` overrides are honoured. |
 
 Add scenarios with **+ Add scenario** and remove them with the delete button on
 each row.

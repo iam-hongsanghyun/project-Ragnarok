@@ -53,7 +53,16 @@ import pandas as pd
 import pypsa
 from fastapi import HTTPException
 
-from .inputs import PriceSet, VomTable, price_set, priced_carriers, read_vom
+from .inputs import (
+    PriceSet,
+    VomTable,
+    price_set,
+    priced_carriers,
+    read_price_scenarios,
+    read_vom,
+    scenario_prices,
+    stochastic_price_changes,
+)
 
 #: Bus carriers that mean electricity (mirrors ``backend/app/plants/thermal._AC``).
 ELECTRIC_BUS_CARRIERS = frozenset({"", "ac", "dc", "electricity", "elec", "power"})
@@ -282,45 +291,30 @@ def _dense(network: pypsa.Network, component: str, attr: str) -> pd.DataFrame:
     return network.get_switchable_as_dense(component, attr).astype(float)
 
 
-def build_plan(network: pypsa.Network, model: dict[str, Any], currency: str = "") -> FuelPlan:
-    """Decide every unit's marginal-cost series for ``network`` (nothing is written; see :func:`apply_plan`).
-
-    Args:
-        network: the built network (its snapshots are the run's window).
-        model: the workbook sheets (the inputs and the unit rows are read from them).
-        currency: symbol for the notes.
-
-    Raises:
-        HTTPException: 400 - an unusable efficiency on a priced unit (stated, or a series that is <= 0 / NaN on a
-            modelled snapshot); a malformed input sheet; a stochastic network (the scenario dimension is not supported).
-    """
-    if getattr(network, "has_scenarios", False):
-        raise HTTPException(status_code=400, detail="Fuel costs cannot be applied to a stochastic network (the scenario dimension is not supported). "
-                            "Turn the module off with options.fuelCosts.enabled = false, or run without stochastic scenarios.")
-    snaps = network.snapshots
-    vom = read_vom(model)
-    prices = price_set(model, snaps)
-    priced = priced_carriers(model)
-    specs = resolve_units(model, vom, priced)
-    raise_on_efficiency_problems(specs)
-
-    eta_dense = {GENERATOR: _dense(network, GENERATOR, "efficiency"), LINK: _dense(network, LINK, "efficiency")}
-    mc_dense = {GENERATOR: _dense(network, GENERATOR, "marginal_cost"), LINK: _dense(network, LINK, "marginal_cost")}
-    present = {GENERATOR: set(network.generators.index), LINK: set(network.links.index)}
-
+def _apply_specs(
+    specs: list[UnitSpec],
+    snaps: pd.Index,
+    prices: pd.DataFrame,
+    eta_dense: dict[str, pd.DataFrame],
+    mc_dense: dict[str, pd.DataFrame],
+    present: dict[str, set[str]],
+    scenario: str = "",
+) -> tuple[list[AppliedUnit], list[str]]:
+    """The per-unit rule on plain (one scenario, or none) frames: ``(units, problems)``."""
     units: list[AppliedUnit] = []
     problems: list[str] = []
+    where = f" in scenario '{scenario}'" if scenario else ""
     for s in specs:
         if s.name not in present[s.component]:
             continue
         eta = eta_dense[s.component][s.name]
         mc_old = mc_dense[s.component][s.name]
-        fuel = prices.frame[s.fuel_carrier] if s.fuel_carrier is not None and s.fuel_carrier in prices.frame.columns else None
+        fuel = prices[s.fuel_carrier] if s.fuel_carrier is not None and s.fuel_carrier in prices.columns else None
         if s.skip is not None:
             units.append(AppliedUnit(s, eta, fuel, mc_old, mc_old.copy(), "skipped", s.skip))
             continue
         if s.needs_eta and not bool(((eta > 0) & np.isfinite(eta)).all()):
-            problems.append(f"{s.component} {s.name}: efficiency series is <= 0 or blank on a modelled snapshot")
+            problems.append(f"{s.component} {s.name}: efficiency is <= 0 or blank on a modelled snapshot{where}")
             continue
         if s.role != ROLE_VOM_ONLY and (fuel is None or fuel.notna().sum() == 0):
             why = f"no price for carrier '{s.fuel_carrier}' on any modelled snapshot" if s.fuel_carrier else "no fuel carrier"
@@ -340,12 +334,118 @@ def build_plan(network: pypsa.Network, model: dict[str, Any], currency: str = ""
             mc_new = eta * s.vom
         n_unpriced = int(fuel.isna().sum()) if fuel is not None and s.role != ROLE_VOM_ONLY else 0
         units.append(AppliedUnit(s, eta, fuel, mc_old, mc_new.astype(float), "applied", "", n_unpriced))
+    return units, problems
+
+
+def build_plan(network: pypsa.Network, model: dict[str, Any], currency: str = "") -> FuelPlan:
+    """Decide every unit's marginal-cost series for a non-stochastic ``network`` (nothing is written; see :func:`apply_plan`).
+
+    Args:
+        network: the built network (its snapshots are the run's window).
+        model: the workbook sheets (the inputs and the unit rows are read from them).
+        currency: symbol for the notes.
+
+    Raises:
+        HTTPException: 400 - an unusable efficiency on a priced unit (stated, or a series that is <= 0 / NaN on a
+            modelled snapshot); a malformed input sheet; a stochastic network (use :func:`build_stochastic_plans`).
+    """
+    if getattr(network, "has_scenarios", False):
+        raise HTTPException(status_code=500, detail="build_plan is for a deterministic network; use build_stochastic_plans.")
+    snaps = network.snapshots
+    vom = read_vom(model)
+    prices = price_set(model, snaps)
+    priced = priced_carriers(model)
+    specs = resolve_units(model, vom, priced)
+    raise_on_efficiency_problems(specs)
+
+    eta_dense = {GENERATOR: _dense(network, GENERATOR, "efficiency"), LINK: _dense(network, LINK, "efficiency")}
+    mc_dense = {GENERATOR: _dense(network, GENERATOR, "marginal_cost"), LINK: _dense(network, LINK, "marginal_cost")}
+    present = {GENERATOR: set(network.generators.index), LINK: set(network.links.index)}
+    units, problems = _apply_specs(specs, snaps, prices.frame, eta_dense, mc_dense, present)
     if problems:
         raise HTTPException(status_code=400, detail="Fuel costs: " + "; ".join(problems[:8]))
 
     plan = FuelPlan(units, prices)
     plan.notes = describe(plan, currency)
     return plan
+
+
+def build_stochastic_plans(network: pypsa.Network, model: dict[str, Any], config: Any, currency: str = "") -> dict[str, FuelPlan]:
+    """One :class:`FuelPlan` per scenario of a stochastic network, computed AFTER the scenario overrides were applied.
+
+    Scenario ``S`` sees its own fuel prices (the base series, then the ``RAGNAROK_FuelPriceScenarios`` rows of ``S``, then the
+    ``carriers.fuel_price`` override rows of ``S``), its own efficiency (static or series, after its overrides) and its own
+    workbook marginal cost where the module leaves a unit alone. ``config`` is the parsed ``StochasticConfig``.
+
+    Raises:
+        HTTPException: 400 - as :func:`build_plan`, naming the scenario; a ``marginal_cost`` override of a unit the module prices.
+    """
+    snaps = network.snapshots
+    vom = read_vom(model)
+    base = price_set(model, snaps)
+    priced = priced_carriers(model)
+    specs = resolve_units(model, vom, priced)
+    raise_on_efficiency_problems(specs)
+    raise_on_marginal_cost_overrides(config, specs)
+    changes = read_price_scenarios(model) + stochastic_price_changes(config)
+    eta_all = {GENERATOR: _dense(network, GENERATOR, "efficiency"), LINK: _dense(network, LINK, "efficiency")}
+    mc_all = {GENERATOR: _dense(network, GENERATOR, "marginal_cost"), LINK: _dense(network, LINK, "marginal_cost")}
+    present = {GENERATOR: {str(n[-1]) for n in network.generators.index}, LINK: {str(n[-1]) for n in network.links.index}}
+
+    def of_scenario(frames: dict[str, pd.DataFrame], name: str) -> dict[str, pd.DataFrame]:
+        return {c: f.xs(name, level="scenario", axis=1) for c, f in frames.items()}
+
+    plans: dict[str, FuelPlan] = {}
+    problems: list[str] = []
+    for k, sc in enumerate(config.scenarios):
+        frame = scenario_prices(base.frame, changes, sc.name)
+        source = dict(base.source)
+        source.update({c: "scenario" for c in frame.columns if c not in base.frame.columns})
+        units, probs = _apply_specs(specs, snaps, frame, of_scenario(eta_all, sc.name), of_scenario(mc_all, sc.name), present, sc.name)
+        problems += probs
+        plan = FuelPlan(units, PriceSet(frame, source))
+        notes = describe(plan, currency, label=sc.name)
+        plan.notes = notes if k == 0 else [n for n in notes if "overrode marginal_cost" in n]
+        plans[sc.name] = plan
+    if problems:
+        raise HTTPException(status_code=400, detail="Fuel costs: " + "; ".join(problems[:8]))
+    return plans
+
+
+def marginal_cost_overrides(config: Any, specs: list[UnitSpec]) -> list[str]:
+    """Stochastic override rows that set ``marginal_cost`` of a unit the module prices (it writes that value itself)."""
+    hits: list[str] = []
+    if config is None or not getattr(config, "enabled", False):
+        return hits
+    kind = {"generators": GENERATOR, "links": LINK}
+    for sc in config.scenarios:
+        for ov in sc.overrides:
+            comp = kind.get(ov.sheet)
+            if comp is None or ov.attribute != "marginal_cost":
+                continue
+            for u in specs:
+                if u.component != comp or u.skip is not None:
+                    continue
+                if (ov.scope_type == "all" or (ov.scope_type == "name" and u.name == ov.scope_value)
+                        or (ov.scope_type == "carrier" and u.carrier == ov.scope_value)):
+                    scope = "all rows" if ov.scope_type == "all" else f"{ov.scope_type} {ov.scope_value}"
+                    hits.append(f"scenario '{sc.name}' overrides {ov.sheet}.marginal_cost ({scope}, {ov.operation} {ov.value:g}), which hits {u.component} {u.name}")
+                    break
+    return hits
+
+
+def raise_on_marginal_cost_overrides(config: Any, specs: list[UnitSpec]) -> None:
+    hits = marginal_cost_overrides(config, specs)
+    if hits:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Fuel costs: " + "; ".join(hits[:6]) + ". The fuel-costs module writes the marginal cost of those units "
+                "(fuel / efficiency + VOM), so a marginal_cost override would scale the VOM too or be overwritten. "
+                "Change the fuel price instead (override sheet carriers, attribute fuel_price, or RAGNAROK_FuelPriceScenarios), "
+                "or `efficiency` (honoured), or turn the module off with options.fuelCosts.enabled = false."
+            ),
+        )
 
 
 def apply_plan(network: pypsa.Network, plan: FuelPlan) -> int:
@@ -360,20 +460,34 @@ def apply_plan(network: pypsa.Network, plan: FuelPlan) -> int:
     return n
 
 
+def apply_stochastic_plans(network: pypsa.Network, plans: dict[str, FuelPlan]) -> int:
+    """Write every scenario's series as ``(scenario, name)`` columns of ``generators_t`` / ``links_t`` ``marginal_cost``."""
+    n = 0
+    for scenario, plan in plans.items():
+        for u in plan.units:
+            if not u.changed:
+                continue
+            frame = network.generators_t.marginal_cost if u.spec.component == GENERATOR else network.links_t.marginal_cost
+            frame[(scenario, u.spec.name)] = u.mc_new.to_numpy(dtype=float)
+            n += 1
+    return n
+
+
 def _mean(s: pd.Series) -> float:
     return float(s.mean()) if len(s) else float("nan")
 
 
-def describe(plan: FuelPlan, currency: str = "") -> list[str]:
+def describe(plan: FuelPlan, currency: str = "", label: str = "") -> list[str]:
     """The run notes: what was overridden (old -> new mean), what was left alone and why."""
     cur = f" {currency}" if currency else ""
+    tag = f"[scenario {label}] " if label else ""
     applied = [u for u in plan.units if u.changed]
     notes: list[str] = []
     if not plan.units:
         return notes
     src = ", ".join(f"{c} ({k})" for c, k in sorted(plan.prices.source.items())) or "none"
     notes.append(
-        f"Fuel costs: marginal cost = fuel price / efficiency + VOM written for {len(applied)} unit(s) at run time "
+        f"{tag}Fuel costs: marginal cost = fuel price / efficiency + VOM written for {len(applied)} unit(s) at run time "
         f"(carbon is not in it: the carbon-pricing module adds it to the objective). Price sources: {src}."
     )
     lines = [
@@ -383,17 +497,17 @@ def describe(plan: FuelPlan, currency: str = "") -> list[str]:
     if lines:
         shown = lines[:_MAX_NOTE_UNITS]
         more = f" ... and {len(lines) - len(shown)} more" if len(lines) > len(shown) else ""
-        notes.append("Fuel costs overrode marginal_cost (mean, old -> new): " + "; ".join(shown) + more + ".")
+        notes.append(f"{tag}Fuel costs overrode marginal_cost (mean, old -> new): " + "; ".join(shown) + more + ".")
     for u in plan.units:
         if u.status == "skipped" or u.status == "unpriced":
-            notes.append(f"Fuel costs: {u.spec.component} {u.spec.name} left as the workbook has it - {u.reason}.")
+            notes.append(f"{tag}Fuel costs: {u.spec.component} {u.spec.name} left as the workbook has it - {u.reason}.")
         elif u.unpriced_snapshots:
             notes.append(
-                f"Fuel costs: {u.spec.component} {u.spec.name}: no price for '{u.spec.fuel_carrier}' on "
+                f"{tag}Fuel costs: {u.spec.component} {u.spec.name}: no price for '{u.spec.fuel_carrier}' on "
                 f"{u.unpriced_snapshots} of {len(u.mc_new)} snapshot(s); the workbook's marginal cost stands there."
             )
     no_vom = [u.spec.name for u in applied if u.spec.vom_source == "none" and u.spec.role not in (ROLE_VOM_ONLY, ROLE_SUPPLIER)]
     if no_vom:
         shown_names = ", ".join(no_vom[:_MAX_NOTE_UNITS]) + (f" ... and {len(no_vom) - _MAX_NOTE_UNITS} more" if len(no_vom) > _MAX_NOTE_UNITS else "")
-        notes.append(f"Fuel costs: no RAGNAROK_VariableOM row for {len(no_vom)} priced unit(s), VOM taken as 0: {shown_names}.")
+        notes.append(f"{tag}Fuel costs: no RAGNAROK_VariableOM row for {len(no_vom)} priced unit(s), VOM taken as 0: {shown_names}.")
     return notes

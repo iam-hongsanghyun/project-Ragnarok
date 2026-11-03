@@ -6,13 +6,15 @@
  * breakdown shows it next to fuel and VOM for the run's current carbon setting. The server computes; the browser lists.
  */
 import React, { useState } from 'react';
-import type { CarbonPriceScheduleEntry } from 'lib/types';
+import type { CarbonPriceScheduleEntry, StochasticConfig } from 'lib/types';
 import { previewFuelCosts, type FuelCostsPreview } from 'lib/api/fuelCosts';
 
 export interface FuelCostsPreviewPanelProps {
   carbonPrice: number;
   carbonPriceSchedule: CarbonPriceScheduleEntry[];
   currencySymbol: string;
+  /** When enabled, the preview also lists each scenario's own mean marginal cost. */
+  stochasticConfig?: StochasticConfig;
   /** Push the browser's working model to the session (the server reads the session). */
   onSessionSync: () => Promise<void>;
 }
@@ -20,7 +22,7 @@ export interface FuelCostsPreviewPanelProps {
 const money = (n: number | null | undefined): string =>
   n == null ? '-' : (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 });
 
-export function FuelCostsPreviewPanel({ carbonPrice, carbonPriceSchedule, currencySymbol, onSessionSync }: FuelCostsPreviewPanelProps) {
+export function FuelCostsPreviewPanel({ carbonPrice, carbonPriceSchedule, currencySymbol, stochasticConfig, onSessionSync }: FuelCostsPreviewPanelProps) {
   const [preview, setPreview] = useState<FuelCostsPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +32,7 @@ export function FuelCostsPreviewPanel({ carbonPrice, carbonPriceSchedule, curren
     setError(null);
     try {
       await onSessionSync();
-      setPreview(await previewFuelCosts(carbonPrice, carbonPriceSchedule));
+      setPreview(await previewFuelCosts(carbonPrice, carbonPriceSchedule, 'default', stochasticConfig?.enabled ? stochasticConfig : undefined));
     } catch (e) {
       setPreview(null);
       setError(e instanceof Error ? e.message : 'Preview failed');
@@ -88,6 +90,30 @@ export function FuelCostsPreviewPanel({ carbonPrice, carbonPriceSchedule, curren
               Per MWh of electricity (MWh thermal for a fuel supplier), time mean over the priced snapshots. A Link carries VOM x efficiency per MWh of
               input; its fuel is priced on the supply generator on its input bus.
             </p>
+          )}
+          {preview.scenarios && preview.scenarios.length > 0 && (
+            <>
+              <p className="sg-setting-hint">
+                Stochastic run: each scenario's mean marginal cost ({currencySymbol}/MWh, after that scenario's fuel price and efficiency overrides;
+                VOM is not scaled by a fuel multiplier).
+              </p>
+              <table className="sg-table">
+                <thead>
+                  <tr><th>Unit</th>{preview.scenarios.map((s) => <th key={s.name}>{s.name} (p={s.weight})</th>)}</tr>
+                </thead>
+                <tbody>
+                  {preview.units.map((u) => (
+                    <tr key={`${u.component}-${u.name}`}>
+                      <td>{u.name}</td>
+                      {preview.scenarios!.map((s) => {
+                        const row = s.units.find((x) => x.component === u.component && x.name === u.name);
+                        return <td key={s.name}>{money(row?.marginalCost.newMean)}</td>;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
           {preview.notes.length > 0 && preview.active && (
             <ul className="sg-setting-hint">{preview.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>

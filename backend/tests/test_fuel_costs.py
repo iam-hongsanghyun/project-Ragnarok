@@ -225,13 +225,6 @@ def test_malformed_inputs_are_a_400() -> None:
         build_network(m, {"carbonPrice": 0.0, "discountRate": 0.0}, {})
 
 
-def test_stochastic_with_inputs_is_refused() -> None:
-    ctx = mh.RunContext(model=_model(), options={}, stochastic=type("S", (), {"enabled": True})())
-    with pytest.raises(HTTPException) as exc:
-        mh.run_guards(ctx)
-    assert exc.value.status_code == 400 and "stochastic" in str(exc.value.detail)
-
-
 def test_no_inputs_is_a_no_op_identical_to_a_host_without_the_module() -> None:
     m = _model(sheets=False)
     assert not fc.has_inputs(m)
@@ -409,3 +402,171 @@ def test_merit_order_and_rolling_penalty_read_the_written_series_not_the_workboo
     from backend.pypsa.rolling import AUTO_PENALTY_FACTOR
 
     assert auto_terminal_penalty(n) == pytest.approx(AUTO_PENALTY_FACTOR * 103.0)    # the dearest cost charged (coal in hours 2-3)
+
+
+# ── stochastic runs ────────────────────────────────────────────────────────────────
+
+W_LOW, W_HIGH = 0.6, 0.4
+
+
+def _ov(sheet: str, attribute: str, scope: str, value: float, op: str = "multiply", scope_type: str = "name") -> dict[str, Any]:
+    return {"sheet": sheet, "attribute": attribute, "scopeType": scope_type, "scopeValue": scope, "operation": op, "value": value}
+
+
+def _stoch(low: list[dict[str, Any]] | None = None, high: list[dict[str, Any]] | None = None, extra: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    scenarios = [{"name": "low", "weight": W_LOW, "overrides": low if low is not None else [_ov("carriers", "fuel_price", "gas", 0.5)]},
+                 {"name": "high", "weight": W_HIGH, "overrides": high if high is not None else [_ov("carriers", "fuel_price", "gas", 2.0)]}]
+    return {"stochasticConfig": {"enabled": True, "scenarios": scenarios + (extra or [])}}
+
+
+def _price(n: Any, scenario: str, weight: float) -> np.ndarray:
+    """Per-scenario price: PyPSA's stochastic duals are probability-weighted."""
+    return n.buses_t.marginal_price[(scenario, "b")].to_numpy() / weight
+
+
+def _costs(gas_mult: float, coal_eta: float = ETA_COAL) -> tuple[np.ndarray, np.ndarray]:
+    coal = np.array([c / coal_eta + VOM_COAL for c in COAL_P])
+    gas = np.array([gas_mult * g / ETA_GAS + VOM_GAS for g in GAS_P])
+    return coal, gas
+
+
+def test_stochastic_smp_per_scenario_is_that_scenarios_fuel_over_efficiency_plus_vom() -> None:
+    n, notes = _solve(_model(), options=_stoch())
+    for name, w, mult in (("low", W_LOW, 0.5), ("high", W_HIGH, 2.0)):
+        coal, gas = _costs(mult)
+        np.testing.assert_allclose(_price(n, name, w), np.maximum(coal, gas), rtol=1e-9)
+    # the marginal unit differs between the scenarios in hour 0: coal (53 > 47.5) in "low", gas (183.8 > 53) in "high"
+    assert _costs(0.5)[0][0] > _costs(0.5)[1][0] and _costs(2.0)[1][0] > _costs(2.0)[0][0]
+    # VOM is NOT scaled: the Link keeps VOM x eta, the supplier carries mult x fuel, coal is untouched
+    mc_l, mc_g, mc_c = n.links_t.marginal_cost, n.generators_t.marginal_cost, n.generators_t.marginal_cost
+    for name, mult in (("low", 0.5), ("high", 2.0)):
+        np.testing.assert_allclose(mc_l[(name, "ccgt")].to_numpy(), VOM_GAS * ETA_GAS, rtol=1e-12)
+        np.testing.assert_allclose(mc_g[(name, "gas_supply")].to_numpy(), [mult * g for g in GAS_P], rtol=1e-12)
+        np.testing.assert_allclose(mc_c[(name, "coal")].to_numpy(), _costs(1.0)[0], rtol=1e-12)
+    assert float(n.generators.at[("low", "coal"), "marginal_cost"]) == 999.0       # the static column is untouched
+    assert any("[scenario low]" in x for x in notes) and any("[scenario high]" in x for x in notes)
+
+
+def test_price_scenarios_sheet_gives_the_same_series_as_the_override_row_and_supports_price_and_snapshot() -> None:
+    m = _model()
+    m[fc.SHEET_PRICE_SCENARIOS] = [
+        {"scenario": "low", "carrier": "gas", "multiplier": 0.5},
+        {"scenario": "high", "carrier": "gas", "multiplier": 2.0},
+    ]
+    n, _ = _solve(m, options=_stoch(low=[], high=[]))
+    for name, mult in (("low", 0.5), ("high", 2.0)):
+        np.testing.assert_allclose(n.generators_t.marginal_cost[(name, "gas_supply")].to_numpy(), [mult * g for g in GAS_P], rtol=1e-12)
+    # an absolute price on one snapshot only, then a multiplier on top (rows apply in order)
+    m[fc.SHEET_PRICE_SCENARIOS] = [{"scenario": "high", "carrier": "gas", "snapshot": STAMPS[2], "price": 100.0},
+                                   {"scenario": "high", "carrier": "gas", "multiplier": 2.0}]
+    n, _ = _solve(m, options=_stoch(low=[], high=[]))
+    np.testing.assert_allclose(n.generators_t.marginal_cost[("high", "gas_supply")].to_numpy(), [100.0, 60.0, 200.0, 60.0], rtol=1e-12)
+    np.testing.assert_allclose(n.generators_t.marginal_cost[("low", "gas_supply")].to_numpy(), GAS_P, rtol=1e-12)   # base for the other scenario
+    bad = _model()
+    bad[fc.SHEET_PRICE_SCENARIOS] = [{"scenario": "low", "carrier": "gas"}]
+    with pytest.raises(HTTPException) as exc:
+        build_network(bad, {"carbonPrice": 0.0, "discountRate": 0.0}, _stoch())
+    assert exc.value.status_code == 400 and "price or a multiplier" in str(exc.value.detail)
+
+
+def test_an_efficiency_override_is_honoured_by_that_scenarios_marginal_cost() -> None:
+    n, _ = _solve(_model(), options=_stoch(low=[_ov("generators", "efficiency", "coal", 0.5, op="set")], high=[]))
+    np.testing.assert_allclose(n.generators_t.marginal_cost[("low", "coal")].to_numpy(), _costs(1.0, coal_eta=0.5)[0], rtol=1e-12)
+    np.testing.assert_allclose(n.generators_t.marginal_cost[("high", "coal")].to_numpy(), _costs(1.0)[0], rtol=1e-12)
+    coal, gas = _costs(1.0, coal_eta=0.5)
+    np.testing.assert_allclose(_price(n, "low", W_LOW), np.maximum(coal, gas), rtol=1e-9)
+    # an efficiency override that makes a priced unit unusable is a 400 naming the scenario
+    with pytest.raises(HTTPException) as exc:
+        build_network(_model(), {"carbonPrice": 0.0, "discountRate": 0.0}, _stoch(low=[_ov("generators", "efficiency", "coal", 0.0, op="set")]))
+    assert exc.value.status_code == 400 and "scenario 'low'" in str(exc.value.detail)
+
+
+def test_a_marginal_cost_override_of_a_priced_unit_is_refused_but_an_unpriced_one_is_not() -> None:
+    for ov in (_ov("generators", "marginal_cost", "coal", 2.0), _ov("generators", "marginal_cost", "gas", 2.0, scope_type="carrier"),
+               _ov("links", "marginal_cost", "ccgt", 2.0), _ov("generators", "marginal_cost", "", 1.1, scope_type="all")):
+        opts = _stoch(low=[ov])
+        with pytest.raises(HTTPException) as exc:
+            mh.run_guards(mh.RunContext(model=_model(), options={}, stochastic=type("S", (), {"enabled": True, "scenarios": _cfg(opts).scenarios})()))
+        assert exc.value.status_code == 400 and "scenario 'low'" in str(exc.value.detail) and "marginal_cost" in str(exc.value.detail)
+        with pytest.raises(HTTPException):
+            build_network(_model(), {"carbonPrice": 0.0, "discountRate": 0.0}, opts)
+    m = _model()
+    m["generators"].append({"name": "wind", "bus": "b", "carrier": "wind", "p_nom": 10, "marginal_cost": 5.0})
+    n, _ = build_network(m, {"carbonPrice": 0.0, "discountRate": 0.0}, _stoch(low=[_ov("generators", "marginal_cost", "wind", 3.0)]))
+    assert float(n.generators.at[("low", "wind"), "marginal_cost"]) == 15.0
+
+
+def _cfg(options: dict[str, Any]) -> Any:
+    from backend.app.stochastic.scenarios import parse_stochastic_config
+
+    return parse_stochastic_config(options["stochasticConfig"])
+
+
+def test_stochastic_results_per_scenario_expected_values_and_representative() -> None:
+    from backend.pypsa.results import run_pypsa
+
+    m = _model(link_cap_cost=55.0, coal_cap_cost=100.0)
+    res = run_pypsa(m, {"carbonPrice": 50.0, "discountRate": 0.0}, _stoch())
+    fcs = res["fuelCosts"]
+    assert fcs["representativeScenario"] == "low" and [s["name"] for s in fcs["scenarios"]] == ["low", "high"]
+    by = {s["name"]: {u["name"]: u for u in s["units"]} for s in fcs["scenarios"]}
+    # the plain rows are the representative (highest-weight) scenario's
+    assert {u["name"]: u["lcoe"] for u in fcs["units"]} == {k: v["lcoe"] for k, v in by["low"].items()}
+    exp = {u["name"]: u for u in fcs["expected"]["units"]}
+    for unit in ("coal", "ccgt"):
+        parts = [(W_LOW, by["low"][unit]), (W_HIGH, by["high"][unit])]
+        for key in ("value", "fuel", "carbon"):
+            want = sum(w * (u["lcoe"][key] or 0.0) for w, u in parts)
+            assert exp[unit]["lcoe"][key] == pytest.approx(want, abs=1e-5)
+        assert exp[unit]["timeMean"]["total"] == pytest.approx(sum(w * u["timeMean"]["total"] for w, u in parts), abs=1e-5)
+    # hand check of one scenario: "high" coal fuel term = dispatch-weighted mean of coal fuel / eta (price does not depend on scenario)
+    coal_high = by["high"]["coal"]
+    assert coal_high["timeMean"]["carbon"] == pytest.approx(50 * 0.34 / ETA_COAL)
+    # the gas Link's carbon is its supplier's: price x 0.2 / eta, per scenario
+    assert by["high"]["ccgt"]["timeMean"]["carbon"] == pytest.approx(50 * 0.2 / ETA_GAS)
+    # the scenario fuel of the CCGT follows ITS gas price: time mean of mult x gas / eta
+    assert by["low"]["ccgt"]["timeMean"]["fuel"] == pytest.approx(0.5 * np.mean(GAS_P) / ETA_GAS)
+    assert by["high"]["ccgt"]["timeMean"]["fuel"] == pytest.approx(2.0 * np.mean(GAS_P) / ETA_GAS)
+
+
+def test_stochastic_lcoe_carbon_part_matches_the_carbon_pricing_modules_per_scenario_cost() -> None:
+    n, _ = _solve(_model(coal_cap_cost=100.0), carbon=50.0, options=_stoch())
+    out = fc.stochastic_results(n, n._ragnarok_fuel_plans, {"low": W_LOW, "high": W_HIGH}, "low")
+    carbon = cp.carbon_cost_by_generator(n, per_scenario=True)
+    for sc in out["scenarios"]:
+        coal = next(u for u in sc["units"] if u["name"] == "coal")
+        gen = float(n.generators_t.p[(sc["name"], "coal")].sum())
+        assert coal["lcoe"]["carbon"] == pytest.approx(carbon[(sc["name"], "coal")] / gen, rel=1e-9)
+
+
+def test_deterministic_path_does_not_touch_the_stochastic_machinery() -> None:
+    n, _ = _solve(_model())
+    assert not hasattr(n, "_ragnarok_fuel_plans") and hasattr(n, "_ragnarok_fuel_plan")
+    m = _model()
+    m[fc.SHEET_PRICE_SCENARIOS] = [{"scenario": "high", "carrier": "gas", "multiplier": 2.0}]
+    n2, notes = _solve(m)
+    np.testing.assert_allclose(n2.generators_t.marginal_cost["gas_supply"].to_numpy(), GAS_P)   # scenario rows ignored
+    assert any("stochastic scenarios only" in x for x in notes)
+
+
+def test_preview_endpoint_shows_per_scenario_mean_marginal_cost_when_stochastic() -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app import model_store
+    from backend.app.main import app
+
+    c = TestClient(app)
+    sid = "test-fuel-costs-preview-stoch"
+    model_store.save_model(sid, _model())
+    try:
+        body = c.post("/api/fuel-costs/preview", json={"sessionId": sid, **_stoch()}).json()
+        sc = {s["name"]: {u["name"]: u for u in s["units"]} for s in body["scenarios"]}
+        assert sc["low"]["gas_supply"]["marginalCost"]["newMean"] == pytest.approx(0.5 * np.mean(GAS_P))
+        assert sc["high"]["gas_supply"]["marginalCost"]["newMean"] == pytest.approx(2.0 * np.mean(GAS_P))
+        assert sc["high"]["ccgt"]["marginalCost"]["newMean"] == pytest.approx(VOM_GAS * ETA_GAS)
+        bad = c.post("/api/fuel-costs/preview", json={"sessionId": sid, **_stoch(low=[_ov("generators", "marginal_cost", "coal", 2.0)])})
+        assert bad.status_code == 400
+        plain = c.post("/api/fuel-costs/preview", json={"sessionId": sid}).json()
+        assert "scenarios" not in plain or plain["scenarios"] is None
+    finally:
+        model_store.clear(sid)

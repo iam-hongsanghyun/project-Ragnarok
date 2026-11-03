@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from ...pypsa.network import build_components
 from .. import carbon_pricing, fuel_costs, model_store
 from ..run_options_reference import RunOption, register_options
+from ..stochastic.scenarios import apply_scenarios, parse_stochastic_config
 
 router = APIRouter(tags=["fuel-costs"])
 
@@ -24,7 +25,7 @@ register_options([
     RunOption("options.fuelCosts", "object", "Fuel-costs module switch. Inputs: model sheets RAGNAROK_FuelPrices (snapshot + one currency/MWh_thermal "
               "column per fuel carrier), RAGNAROK_VariableOM (component, name | carrier, vom in currency/MWh_el) and the carriers column "
               "fuel_cost_thermal (a constant price). At run time marginal_cost = fuel price / efficiency + VOM is written as a time series "
-              "(Link with a priced supply Generator on bus0: fuel on the supplier, VOM x efficiency on the Link). Carbon is not in it.", None,
+              "(Link with a priced supply Generator on bus0: fuel on the supplier, VOM x efficiency on the Link). Carbon is not in it. Stochastic runs: per-scenario prices from RAGNAROK_FuelPriceScenarios (scenario, carrier, snapshot, price | multiplier) or stochastic override rows (sheet carriers, attribute fuel_price).", None,
               None, None, "backend/app/fuel_costs", "api", "fuelCosts"),
     RunOption("options.fuelCosts.enabled", "boolean", "false leaves every marginal_cost as the workbook states it. Absent: on exactly when the model has "
               "a price sheet, a VOM sheet or a carrier fuel_cost_thermal (a model with none is untouched).", None,
@@ -36,6 +37,8 @@ class FuelCostsPreview(BaseModel):
     sessionId: str = "default"
     carbonPrice: float = 0.0
     carbonPriceSchedule: list[dict[str, Any]] | None = None
+    #: ``options.stochasticConfig``: when enabled, the response adds ``scenarios`` (each scenario's own series).
+    stochasticConfig: dict[str, Any] | None = None
 
 
 @router.post("/api/fuel-costs/preview")
@@ -51,4 +54,13 @@ def fuel_costs_preview(body: FuelCostsPreview) -> dict[str, Any]:
     net, _ = build_components(model, {})
     carbon_pricing.set_plan(net, carbon_pricing.parse_carbon_price_config(body.carbonPrice, body.carbonPriceSchedule))
     plan = fuel_costs.build_plan(net, model)
-    return {**fuel_costs.preview(net, plan), "inputs": inputs}
+    out = {**fuel_costs.preview(net, plan), "inputs": inputs}
+    stoch = parse_stochastic_config(body.stochasticConfig)
+    if stoch.enabled:
+        # the same path a run takes: expand to scenarios, apply their overrides, then plan each scenario
+        snet, _ = build_components(model, {})
+        carbon_pricing.set_plan(snet, carbon_pricing.parse_carbon_price_config(body.carbonPrice, body.carbonPriceSchedule))
+        apply_scenarios(snet, stoch)
+        plans = fuel_costs.build_stochastic_plans(snet, model, stoch)
+        out["scenarios"] = fuel_costs.stochastic_preview(snet, plans, {s.name: s.weight for s in stoch.scenarios})
+    return out

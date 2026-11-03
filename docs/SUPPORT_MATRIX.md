@@ -54,7 +54,7 @@ Counts are the backend schema as shipped: "Input static" and "Input time-series"
 | Unit commitment (MIP; Force-LP override) | ◐ partial |
 | Load shedding (VOLL backstop) | ✓ supported |
 | Carbon price (per-generator marginal cost adder) | ✓ supported |
-| Fuel price series + variable O&M as time-varying marginal cost (`RAGNAROK_FuelPrices`, `RAGNAROK_VariableOM`, `options.fuelCosts.enabled`) | ✓ supported |
+| Fuel price series + variable O&M as time-varying marginal cost (`RAGNAROK_FuelPrices`, `RAGNAROK_VariableOM`, `options.fuelCosts.enabled`), per-scenario prices in stochastic runs (`RAGNAROK_FuelPriceScenarios`, `carriers.fuel_price` override) | ✓ supported |
 | Annuitised CAPEX for extendable assets | ✓ supported |
 | UI-authored linopy constraints | ✓ supported |
 | Native PyPSA global_constraints editor | ✓ supported |

@@ -172,8 +172,12 @@ def apply_scenarios(network: pypsa.Network, config: StochasticConfig) -> None:
 
       - **Load × 0.8** in this scenario:
         ``{sheet: loads, attribute: p_set, scope: all, op: multiply, value: 0.8}``
-      - **Fuel price × 2** on gas generators:
+      - **Fuel price × 2** for gas (the fuel term only, not the VOM):
+        ``{sheet: carriers, attribute: fuel_price, scope: name, scope_value: gas, op: multiply, value: 2}`` - read by the
+        fuel-costs module (``backend/app/fuel_costs``), which writes each scenario's ``fuel / efficiency + VOM``. Without that
+        module's inputs a plain generator cost is scaled instead:
         ``{sheet: generators, attribute: marginal_cost, scope: carrier, scope_value: gas, op: multiply, value: 2}``
+        (refused, HTTP 400, for a unit the fuel-costs module prices: it writes that cost itself).
       - **Drought year on a specific hydro plant**:
         ``{sheet: generators, attribute: p_max_pu, scope: name, scope_value: hydro_a, op: multiply, value: 0.4}``
     """
@@ -226,6 +230,8 @@ def _apply_advanced_override(
     survives whether the user supplied the attribute as a scalar or as a
     time series.
     """
+    if override.sheet == "carriers" and override.attribute == "fuel_price":
+        return  # not a PyPSA attribute: the fuel-costs module reads these rows (fuel_costs.stochastic_price_changes)
     targets = _resolve_override_targets(network, scenario, override)
     if len(targets) == 0:
         return

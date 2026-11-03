@@ -7,6 +7,10 @@ Three visible inputs, all in the workbook:
   workbook's own marginal cost there, and the run reports it).
 * the ``carriers`` column ``fuel_cost_thermal`` (written by the fuel-price importer): a CONSTANT price for a
   carrier that has no column in the sheet.
+* ``RAGNAROK_FuelPriceScenarios`` - static long rows ``{scenario, carrier, snapshot (blank = all), price | multiplier}``:
+  what a stochastic scenario changes in the fuel price (a second, long sheet, because a ``scenario`` key column cannot live in the
+  wide temporal sheet: duplicate ``snapshot`` labels and a text value column break the series machinery). The same change can be
+  authored as a stochastic override row (sheet ``carriers``, attribute ``fuel_price``).
 * ``RAGNAROK_VariableOM`` - static rows ``{component, name, vom}`` or ``{component, carrier, vom}``,
   ``vom`` in currency/MWh of electric output; a name row beats a carrier row; no row = 0 (reported).
 
@@ -26,6 +30,7 @@ from backend.pypsa.network.snapshots import parse_snapshot_labels
 
 SHEET_PRICES = "RAGNAROK_FuelPrices"
 SHEET_VOM = "RAGNAROK_VariableOM"
+SHEET_PRICE_SCENARIOS = "RAGNAROK_FuelPriceScenarios"
 FLAT_COLUMN = "fuel_cost_thermal"
 VOM_COMPONENTS = ("Generator", "Link")
 _INDEX = "snapshot"
@@ -161,6 +166,7 @@ def priced_carriers(model: dict[str, Any] | None) -> set[str]:
     out = {str(c) for c in sheet.columns if sheet[c].notna().any()} if not sheet.empty else set()
     sheet_columns = {str(c) for c in sheet.columns}
     out |= {c for c in flat_prices(model) if c not in sheet_columns}
+    out |= {r.carrier for r in read_price_scenarios(model) if r.price is not None}   # a carrier priced only in a scenario
     return out
 
 
@@ -213,7 +219,7 @@ def read_vom(model: dict[str, Any] | None) -> VomTable:
 
 def has_inputs(model: dict[str, Any] | None) -> bool:
     """True when the workbook carries a price sheet with rows, a VOM sheet with rows, or any flat carrier price."""
-    return bool(_rows(model, SHEET_PRICES) or _rows(model, SHEET_VOM) or flat_prices(model))
+    return bool(_rows(model, SHEET_PRICES) or _rows(model, SHEET_VOM) or _rows(model, SHEET_PRICE_SCENARIOS) or flat_prices(model))
 
 
 def is_enabled(model: dict[str, Any] | None, options: dict[str, Any] | None) -> bool:
@@ -223,6 +229,101 @@ def is_enabled(model: dict[str, Any] | None, options: dict[str, Any] | None) -> 
     if isinstance(block, dict) and isinstance(block.get("enabled"), bool):
         return bool(block["enabled"])
     return has_inputs(model)
+
+
+# ── per-scenario fuel prices (stochastic runs) ──────────────────────────────────────
+
+@dataclass(frozen=True)
+class PriceChange:
+    """One change of a carrier's fuel price in a scenario: ``price`` replaces it, ``multiplier`` scales it (price first)."""
+
+    scenario: str
+    carrier: str            # "" = every priced carrier (a stochastic override with scope "all")
+    snapshot: Any = None    # None = every snapshot; else a Timestamp / label
+    price: float | None = None
+    multiplier: float | None = None
+
+
+def read_price_scenarios(model: dict[str, Any] | None) -> list[PriceChange]:
+    """The ``RAGNAROK_FuelPriceScenarios`` rows. Raises ``HTTPException(400)`` naming every unreadable row."""
+    out: list[PriceChange] = []
+    problems: list[str] = []
+    for i, r in enumerate(_rows(model, SHEET_PRICE_SCENARIOS)):
+        scenario, carrier = str(r.get("scenario") or "").strip(), str(r.get("carrier") or "").strip()
+        price, mult = _number(r.get("price")), _number(r.get("multiplier"))
+        if not (scenario or carrier) and price is None and mult is None:
+            continue
+        if not scenario or not carrier:
+            problems.append(f"row {i + 1}: give a scenario and a carrier")
+        elif price is None and mult is None:
+            problems.append(f"row {i + 1}: give a price or a multiplier")
+        elif mult is not None and mult < 0:
+            problems.append(f"row {i + 1}: multiplier must be >= 0")
+        elif not _blank(r.get("price")) and price is None or not _blank(r.get("multiplier")) and mult is None:
+            problems.append(f"row {i + 1}: price / multiplier is not a finite number")
+        else:
+            snap: Any = None
+            if not _blank(r.get("snapshot")):
+                try:
+                    snap = parse_snapshot_labels([str(r["snapshot"])])[0]
+                except Exception:  # noqa: BLE001 - a text label
+                    snap = str(r["snapshot"])
+            out.append(PriceChange(scenario, carrier, snap, price, mult))
+    if problems:
+        raise HTTPException(status_code=400, detail=f"{SHEET_PRICE_SCENARIOS}: " + "; ".join(problems))
+    return out
+
+
+def stochastic_price_changes(config: Any) -> list[PriceChange]:
+    """Stochastic override rows ``carriers.fuel_price`` as price changes (scope ``name`` / ``carrier`` = the carrier, ``all`` = every
+    carrier; ``set`` -> price, ``multiply`` -> multiplier). ``config`` is the parsed ``StochasticConfig`` (duck-typed)."""
+    out: list[PriceChange] = []
+    if config is None or not getattr(config, "enabled", False):
+        return out
+    for sc in config.scenarios:
+        for ov in sc.overrides:
+            if ov.sheet != "carriers" or ov.attribute != "fuel_price":
+                continue
+            carrier = "" if ov.scope_type == "all" else str(ov.scope_value)
+            if ov.scope_type != "all" and not carrier:
+                continue
+            if ov.operation == "set":
+                out.append(PriceChange(sc.name, carrier, None, price=float(ov.value)))
+            else:
+                out.append(PriceChange(sc.name, carrier, None, multiplier=float(ov.value)))
+    return out
+
+
+def scenario_prices(base: pd.DataFrame, changes: list[PriceChange], scenario: str) -> pd.DataFrame:
+    """``base`` (snapshots x carrier) with ``scenario``'s changes applied in order: the sheet rows, then the override rows.
+
+    A blank base cell stays blank under a multiplier (no price x 2 = no price); ``price`` fills it. A carrier with no base
+    column is created by a ``price`` change and ignored by a ``multiplier``.
+    """
+    out = base.copy()
+    idx = out.index.get_level_values(-1) if isinstance(out.index, pd.MultiIndex) else out.index
+    for ch in changes:
+        if ch.scenario != scenario:
+            continue
+        carriers = [c for c in out.columns] if not ch.carrier else [ch.carrier]
+        if ch.snapshot is None:
+            mask = pd.Series(True, index=out.index)
+        elif isinstance(idx, pd.DatetimeIndex) and isinstance(ch.snapshot, pd.Timestamp):
+            mask = pd.Series(idx == ch.snapshot, index=out.index)
+        else:
+            mask = pd.Series([str(v) == str(ch.snapshot) for v in idx], index=out.index)
+        for c in carriers:
+            if c not in out.columns:
+                if ch.price is None:
+                    continue
+                out[c] = float("nan")
+            col = out[c].astype(float)
+            if ch.price is not None:
+                col = col.where(~mask, ch.price)
+            if ch.multiplier is not None:
+                col = col.where(~mask, col * ch.multiplier)
+            out[c] = col
+    return out
 
 
 # ── a transformed time axis ─────────────────────────────────────────────────────────
