@@ -164,10 +164,13 @@ trap 'exit 130' INT TERM
 # build cache. Caveat: if backend Python is edited while a solve is in
 # flight, uvicorn restart will kill the child mp.Process worker — that is
 # acceptable for dev because the solve was about to be invalidated anyway.
+# --timeout-graceful-shutdown: an open browser holds /api/events (SSE) open for
+# good, and without a limit a reload waits for it forever ("Waiting for
+# connections to close") - the backend then stops answering until restarted.
 echo "Starting backend (dev, auto-reloads on backend/* edits)..."
 "$VENV_DIR/bin/python" -m uvicorn backend.app.main:app \
   --host 127.0.0.1 --port 8000 \
-  --reload --reload-dir backend &
+  --reload --reload-dir backend --timeout-graceful-shutdown 3 &
 BACKEND_PID=$!
 
 # Wait only for the port to bind (/api/health), NOT for the full warm.

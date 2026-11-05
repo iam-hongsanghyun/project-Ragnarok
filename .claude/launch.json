@@ -14,7 +14,9 @@
         "8000",
         "--reload",
         "--reload-dir",
-        "backend/app"
+        "backend/app",
+        "--timeout-graceful-shutdown",
+        "3"
       ],
       "port": 8000
     },
