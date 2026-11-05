@@ -9,6 +9,8 @@
  * Scenario") and are read-only here. Model values are edited in Model/Forge,
  * not per scenario. Results are compared in Analytics.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
+import { usePersistedSet } from '../../shared/hooks/usePersistedSet';
 import React, { useMemo, useState } from 'react';
 import type { ScenarioCatalog, ScenarioPreset } from 'lib/types';
 import {
@@ -42,12 +44,12 @@ export function ScenarioDiffTable({
   const scenarios = catalog.scenarios;
   const activeScenario = scenarios.find((s) => s.id === catalog.activeScenarioId) ?? null;
   const [showAll, setShowAll] = useState(false);
-  const [mode, setMode] = useState<BatchMode>('sequential');
+  const [mode, setMode] = usePersistedState<BatchMode>('ui:scenario-diff:mode', 'sequential');
   // The backend clamps to the real core count; keep the UI max at least 2 so the
   // parallel selector is usable even before the first queue poll reports cpuCount.
   const parallelMax = Math.max(2, maxConcurrency);
-  const [concurrency, setConcurrency] = useState(2);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [concurrency, setConcurrency] = usePersistedState('ui:scenario-diff:concurrency', 2);
+  const [selected, setSelected] = usePersistedSet('ui:scenario-diff:selected');
 
   const columns = useMemo(() => scenarioDiffColumns(scenarios, { includeAll: showAll }), [scenarios, showAll]);
 

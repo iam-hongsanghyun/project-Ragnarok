@@ -804,8 +804,8 @@ constraint, so a 4-hourly model with weight 4 counts real hours); $y_p$ the inve
 PyPSA does not weight by years). Single period: `annual × hours / 8760` (168 h → 168/8760; two years → 2×). Pathway: an `e_sum` is one whole-horizon total over
 all periods (energy may move between periods); a global constraint with `investment_period = p` is that period's total (`annual × H_p/8760 × years_p`); without
 one it covers all periods, each weighted by its years. Caps typed as totals (module 16's 10 / 4 / 0.3 Mt per period) have no row and pass through unchanged.
-**Rolling horizon:** PyPSA applies the constant to every window, so a generator `e_sum` is split per window by committed hours (a declared constraint,
-`annual_budgets.extra_functionality`; the column stays unbounded) and a GlobalConstraint budget is refused (400).
+**Rolling horizon:** PyPSA applies the constant to every window, so the values are written as usual and the run turns them into period budgets tracked
+window by window (each window gets what is left; see *Period budgets* below) - a generator `e_sum` and a GlobalConstraint budget alike.
 
 Where it runs: `build_network` after windowing (it needs the final weightings), so it is recomputed whenever the window changes; the table is in the run notes, in
 `annualBudgets` of the results and `network.meta`; `POST /api/annual-budgets/apply` writes the values into the workbook rows for the workbook's own horizon (re-apply after
@@ -872,9 +872,9 @@ module by name. A module that fails to import is skipped and listed in `module_h
 
 | Hook kind | Signature | Called | Used by |
 |---|---|---|---|
-| `submit` | `fn(data) -> data` | `_resolve_payload_model`, before the run is queued | `scenario_overrides` (cell overrides), `constraints` (DSL precedence), `physical_risk` (outage uplift), `p2x` (session RFNBO settings) |
-| `guard` | `fn(ctx)` | `run_pypsa`, before the build | `fuel_costs` (a priced unit without efficiency; a stochastic `marginal_cost` override of a priced unit), `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
-| `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `fuel_costs` (fuel-priced marginal-cost series, order 20; per-scenario series after the broadcast, order 95), `stochastic` (scenario overrides, order 90), `market_studies` (bid + carbon price + piecewise refusal) |
+| `submit` | `fn(data) -> data` | `_resolve_payload_model`, before the run is queued | `scenario_overrides` (cell overrides), `constraints` (DSL precedence), `physical_risk` (outage uplift), `p2x` (the project's RFNBO settings) |
+| `guard` | `fn(ctx)` | `run_pypsa`, before the build | `constraints` (carrier output cap, period budgets), `fuel_costs` (a priced unit without efficiency; a stochastic `marginal_cost` override of a priced unit), `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
+| `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `fuel_costs` (fuel-priced marginal-cost series, order 20; per-scenario series after the broadcast, order 95), `stochastic` (scenario overrides, order 90), `constraints` (rolling: whole-run limits -> tracked period budgets, order 90), `market_studies` (bid + carbon price + piecewise refusal) |
 | `constraints` | `prepare(ctx) -> fn(n, snapshots) \| None` | once before the solve (a bad plan is a 400); the returned contributions are composed into the one `extra_functionality` | `carbon_pricing`, `annual_budgets`, `constraints`, `reserves`, `p2x` (RFNBO), `plants` (co-firing, start-cost tiers) |
 | `replace_solve` | `fn(ctx) -> payload \| None` | after the build; a payload ends the run | `market_studies` (rule-based market simulation) |
 | `post_solve` | `fn(ctx) -> {key: value}` | right after the solve, before the core reads the network; a module that added its own objective term appends `{label, value}` (the term at the solution) to `ctx.objective_terms`, which the cost breakdown lists | `stochastic` (collapse to a representative scenario, duals divided by the scenario probability), `plants` (start-cost tier surcharge) |
@@ -1437,6 +1437,25 @@ ASCII: `sum(Generator-p[g, t] for g with carrier c) <= cap[c, t]`. It is a **fle
 
 Tests: `backend/tests/test_carrier_output_cap.py` (analytical, parity with a hand-written `extra_functionality` at rtol 1e-9, rolling window count, refused
 modes, Forge alignment, model check, plugin delivery then a run).
+
+#### Period budgets (`RAGNAROK_PeriodBudgets`, `constraints/period_budgets.py`)
+
+Energy or emission limits over a period - a month (`period = YYYY-MM`), a year (`YYYY`) or any `start`/`end` range - on a carrier, a list of
+generators, or (emissions) every generator; sense `<=`, `>=` or `==`; the value is the period TOTAL (MWh or tCO2). The column contract and the
+rule are in the module docstring; [project-file.md](./project-file.md) §3 lists the columns for people filling the sheet.
+
+* **Single solve:** the exact constraint $\sum_{t\in P} w_t \sum_g a_g p_{g,t} \lessgtr B$ ($a_g$ = 1 for energy, $e_{c(g)}/\eta_g$ for emissions).
+* **Rolling horizon:** each window gets what is LEFT of the period's budget in proportion to the period hours it sees,
+  $B_W = (B - U_W)\,H_{P\cap W}/H_{P,\,t\ge t_0(W)}$, where $U_W$ is what the committed earlier windows used. What a window under-spends
+  carries over; the run never overspends; a period inside one window (monthly windows, monthly budgets) is exact.
+* **Whole-run limits under rolling** (`carry_whole_run_limits`, called before the rolling check): a `primary_energy` CO2 GlobalConstraint (when
+  no storage / store / link carries an emitting carrier), an `operational_limit` on a generator-only carrier and a generator's finite
+  `e_sum_max` / `e_sum_min` become whole-run budgets under the same rule and are removed from the PyPSA tables (said in the run notes). Other
+  global constraints and capacity expansion are still refused under rolling.
+* **Refused** (400): pathway, stochastic, power-flow, contingency; a row that cannot be read.
+
+Tests: `backend/tests/test_period_budgets.py` (hand-worked objective 5,264,000; aligned, misaligned and overlapping windows equal the single solve;
+CO2 cap and `e_sum` tracked under rolling; emissions by month; malformed rows).
 
 ### 8.2 `apply_constraint_specs` — JSON spec wire format
 

@@ -1,3 +1,4 @@
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useMemo, useState } from 'react';
 import {
   ModuleConfigField,
@@ -419,7 +420,7 @@ interface PluginTabContentProps {
 }
 
 function PluginTabContent({ module, config, onConfigChange, carriers, model, analytics, onModuleAction }: PluginTabContentProps) {
-  const [activeInnerTab, setActiveInnerTab] = useState<PluginInnerTab>('description');
+  const [activeInnerTab, setActiveInnerTab] = usePersistedState<PluginInnerTab>('ui:plugins:inner-tab', 'description');
   const innerTabs: Array<{ key: PluginInnerTab; label: string }> = [
     { key: 'description', label: 'Description' },
     { key: 'input', label: 'Input' },
@@ -469,7 +470,7 @@ interface PluginPanelProps {
 export function PluginPanel({
   modules, moduleConfigs, onModuleConfigChange, carriers, model, pluginAnalytics, onModuleAction,
 }: PluginPanelProps) {
-  const [activeId, setActiveId] = useState<string>(modules[0]?.id ?? '');
+  const [activeId, setActiveId] = usePersistedState<string>('ui:plugins:active-plugin', modules[0]?.id ?? '');
   const activeModules = useMemo(() => modules, [modules]);
 
   if (activeModules.length === 0) {

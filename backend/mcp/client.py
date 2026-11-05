@@ -751,6 +751,15 @@ class RagnarokClient:
     async def open_project_file(self, data: bytes, filename: str) -> Any:
         return await self._upload("/api/project-file", data, filename, {"session_id": self.session_id})
 
+    async def project_template(self, fmt: str) -> tuple[bytes, str | None]:
+        return await self._request_bytes("GET", "/api/project-file/template", params={"format": fmt})
+
+    async def get_run_settings(self) -> Any:
+        return await self._get("/api/session/run-settings", {"session_id": self.session_id})
+
+    async def set_run_settings(self, values: dict[str, Any]) -> Any:
+        return await self._put("/api/session/run-settings", {"values": values, "sessionId": self.session_id})
+
     async def get_app_state(self) -> Any:
         return await self._get("/api/session/app-state", {"session_id": self.session_id})
 

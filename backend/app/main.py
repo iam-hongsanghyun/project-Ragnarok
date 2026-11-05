@@ -1131,9 +1131,14 @@ def _model_with_session_series(
         try:
             from . import app_state
 
+            from . import run_settings
+
             state = model_store.get_app_state(session_id)
             if state:
                 out[app_state.SHEET] = app_state.to_rows(state)
+            if state is not None:
+                # The settings a person edits in the workbook (applied on top of the app state when it is opened again).
+                out[run_settings.SHEET] = run_settings.sheet_rows(state, run_settings.snapshot_labels(out))
         except Exception:  # noqa: BLE001 — an export must not fail over the settings
             logging.getLogger("pypsa_gui.exports").exception("Could not read the app state of session %s", session_id)
     return out
@@ -1226,6 +1231,14 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
         )
     data = _payload_to_dict(payload)
     data["model"] = model
+    if payload.sessionId and payload.model is None:
+        # A run that does not state a setting takes the project's own (run_settings.payload_defaults): an agent's
+        # submit_solve or a script runs the project exactly as its settings say. What the submitter states wins.
+        from . import run_settings
+
+        sc_defaults, opt_defaults = run_settings.payload_defaults(model_store.get_app_state(payload.sessionId))
+        data["scenario"] = {**sc_defaults, **(data.get("scenario") or {})}
+        data["options"] = {**opt_defaults, **(data.get("options") or {})}
     # Module submit hooks (backend/app/module_hooks.py, kind "submit"), in declared order: the scenario cell
     # overrides, the DSL precedence (constraintSpecs > customDsl > the RAGNAROK_CustomDSL sheet), the opt-in
     # physical-risk outage uplift and the session's P2X RFNBO settings. They run HERE, at submit time, so the

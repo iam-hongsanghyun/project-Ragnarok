@@ -7,6 +7,7 @@
  *    each island needs its own slack and its own supply.
  *  - `POST /api/analysis/consistency`: PyPSA's `n.consistency_check` findings (errors and warnings).
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useState } from 'react';
 import {
   ANALYSIS_PARTS,
@@ -75,10 +76,10 @@ function MatrixView({ title, matrix }: { title: string; matrix: MatrixPayload | 
 }
 
 export function NetworkAnalysisPanel({ onSessionSync }: NetworkAnalysisPanelProps) {
-  const [parts, setParts] = useState<AnalysisPart[]>(DEFAULT_PARTS);
-  const [method, setMethod] = useState<CycleBasisMethod>('bfs-refined');
-  const [strictAll, setStrictAll] = useState(false);
-  const [checkDtypes, setCheckDtypes] = useState(false);
+  const [parts, setParts] = usePersistedState<AnalysisPart[]>('ui:network-analysis:parts', DEFAULT_PARTS);
+  const [method, setMethod] = usePersistedState<CycleBasisMethod>('ui:network-analysis:method', 'bfs-refined');
+  const [strictAll, setStrictAll] = usePersistedState('ui:network-analysis:strict-all', false);
+  const [checkDtypes, setCheckDtypes] = usePersistedState('ui:network-analysis:check-dtypes', false);
   const [busy, setBusy] = useState<'analysis' | 'consistency' | null>(null);
   const [analysis, setAnalysis] = useState<NetworkAnalysis | null>(null);
   const [consistency, setConsistency] = useState<ConsistencyReport | null>(null);

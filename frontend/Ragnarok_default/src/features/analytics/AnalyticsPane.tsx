@@ -50,6 +50,7 @@ function EmptyAnalytics() {
 export { EmptyAnalytics };
 
 const ANALYTICS_STORAGE_KEY = 'ragnarok:dashboard:analytics';
+const RESULT_STORAGE_KEY = 'ragnarok:dashboard:result';
 
 export function AnalyticsPane({
   results, model, bounds, busIndex,
@@ -65,6 +66,9 @@ export function AnalyticsPane({
   periodStatus,
   runName,
 }: Props) {
+  const resultStorageKey = results.powerFlow || results.contingency
+    ? `${RESULT_STORAGE_KEY}:network`
+    : results.marketSimulation ? `${RESULT_STORAGE_KEY}:market` : RESULT_STORAGE_KEY;
   return (
     <div className="pane analytics-pane">
       {results.pathway?.enabled && results.pathway.periods.length > 0 && (() => {
@@ -110,7 +114,7 @@ export function AnalyticsPane({
        * Analytics so Reset restores a real dashboard, not a blank pane). */}
       {(subTab === 'Result' || subTab === 'Analytics') && (
         <AnalyticsDashboard
-          key={subTab /* force remount when sub-tab changes so the hook re-reads its storage */}
+          key={`${subTab}|${subTab === 'Result' ? resultStorageKey : ''}` /* force remount when sub-tab or layout kind changes so the hook re-reads its storage */}
           results={results}
           model={model}
           bounds={bounds}
@@ -121,10 +125,10 @@ export function AnalyticsPane({
           currencySymbol={currencySymbol}
           analyticsFocus={analyticsFocus}
           onFocusChange={setAnalyticsFocus}
-          /* Result NEVER persists its layout — it always rebuilds from the
-           * curated preset so code updates show up immediately. Analytics
-           * keeps localStorage persistence for user-built dashboards. */
-          storageKey={subTab === 'Result' ? null : ANALYTICS_STORAGE_KEY}
+          /* Both dashboards persist (and so travel with the project). Result
+           * uses a slot per preset kind, as the network-study and market
+           * presets are different layouts from the standard one. */
+          storageKey={subTab === 'Result' ? resultStorageKey : ANALYTICS_STORAGE_KEY}
           initialLayout={subTab === 'Result' ? buildResultPreset(results, model) : PRESETS[0].build()}
           showPresets={subTab === 'Analytics'}
           onNeedSeries={onNeedSeries}

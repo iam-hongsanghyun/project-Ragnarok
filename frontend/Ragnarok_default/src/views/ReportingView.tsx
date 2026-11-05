@@ -6,6 +6,7 @@
  * run, a perspective, and a layout (document or slides), then renders and
  * prints. No number is computed client-side.
  */
+import { usePersistedState } from '../shared/hooks/usePersistedState';
 import React from 'react';
 import { TopTab, ViewPaneHeader, ViewPanel } from '../shared/components/primitives';
 import type { TopTabItem } from '../shared/components/primitives';
@@ -29,9 +30,9 @@ const reportCache = new Map<string, ReportDocumentPayload>();
 export function ReportingView() {
   const [perspectives, setPerspectives] = React.useState<ReportPerspective[]>([]);
   const [runs, setRuns] = React.useState<ReportRunOption[]>([]);
-  const [runName, setRunName] = React.useState<string>('');
-  const [perspective, setPerspective] = React.useState<string>('policy-maker');
-  const [layout, setLayout] = React.useState<ReportLayout>('document');
+  const [runName, setRunName] = usePersistedState<string>('ui:reporting:run-name', '');
+  const [perspective, setPerspective] = usePersistedState<string>('ui:reporting:perspective', 'policy-maker');
+  const [layout, setLayout] = usePersistedState<ReportLayout>('ui:reporting:layout', 'document');
   const [doc, setDoc] = React.useState<ReportDocumentPayload | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -51,11 +52,11 @@ export function ReportingView() {
       .then((list) => {
         if (!live) return;
         setRuns(list);
-        if (list.length) setRunName((current) => current || list[0].name);
+        if (list.length) setRunName((current) => (current && list.some((r) => r.name === current) ? current : list[0].name));
       })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
-  }, []);
+  }, [setPerspective, setRunName]);
 
   React.useEffect(() => {
     if (!runName || !perspective) return;

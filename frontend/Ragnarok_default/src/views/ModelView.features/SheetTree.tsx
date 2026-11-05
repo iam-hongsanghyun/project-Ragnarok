@@ -16,6 +16,7 @@
  * series sheet on first write (`patch_sheet`), so reachability was the whole bug.
  * Matches upstream Ragnarok `e6a7241`.
  */
+import { usePersistedSet } from '../../shared/hooks/usePersistedSet';
 import React, { useMemo, useState } from 'react';
 import { GridRow, SheetName, TableSel, WorkbookModel } from 'lib/types';
 import { ModelIssue } from '../../features/validation/useModelIssues';
@@ -47,7 +48,7 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
   const tsCount = (sheet: string): number =>
     seriesSheetCounts?.[sheet] ?? ((model as unknown as Record<string, GridRow[]>)[sheet]?.length ?? 0);
   const [navSearch, setNavSearch] = useState('');
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = usePersistedSet('ui:model-tree:collapsed');
 
   const issueCounts = useMemo(() => {
     const counts: Record<string, { errors: number; warnings: number }> = {};

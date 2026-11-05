@@ -11,6 +11,7 @@ import React from 'react';
 import { CompanyStatementResult } from 'lib/types';
 import { CompanyRisk, fetchRunAnalysis, TransitionRiskQuery } from 'lib/api/resultsDerived';
 import { useAsync } from '../../../shared/hooks/useAsync';
+import { usePersistedState } from '../../../shared/hooks/usePersistedState';
 
 interface Props {
   /** The P&L statement: currency and the run's own carbon price (default for the base price). */
@@ -18,6 +19,8 @@ interface Props {
   runName?: string | null;
   /** Pathway investment period; null = the whole horizon. */
   period?: number | null;
+  /** Card id; scopes the saved scenario inputs to this card. */
+  instanceId?: string;
 }
 
 const DEFAULT_PARAMS: TransitionRiskQuery = {
@@ -36,9 +39,9 @@ const EDIT_DEBOUNCE_MS = 300;
 const PALETTE = ['#4e79a7', '#e15759', '#59a14f', '#edc948', '#b07aa1', '#f28e2b', '#76b7b2', '#ff9da7'];
 const money = (v: number, cur: string) => `${v < 0 ? '−' : ''}${cur}${Math.abs(Math.round(v)).toLocaleString()}`;
 
-export function TransitionRiskCard({ data, runName, period = null }: Props) {
+export function TransitionRiskCard({ data, runName, period = null, instanceId = 'default' }: Props) {
   const cur = data.currency || '';
-  const [params, setParams] = React.useState<TransitionRiskQuery>({
+  const [params, setParams] = usePersistedState<TransitionRiskQuery>(`ui:card:transition-risk:${instanceId}:params`, {
     ...DEFAULT_PARAMS,
     basePrice: Math.max(DEFAULT_PARAMS.basePrice, Math.round(data.carbonPrice) || DEFAULT_PARAMS.basePrice),
   });

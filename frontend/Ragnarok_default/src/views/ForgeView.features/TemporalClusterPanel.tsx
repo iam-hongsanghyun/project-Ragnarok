@@ -8,6 +8,7 @@
  * network-reduction tool. This is THE way to change the resolution: the run never strides the snapshots. The Run dialog's
  * Resolution buttons call the same resample. "Set weightings from timestamp spacing" is the companion action.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useState } from 'react';
 import type { TemporalMethod, TemporalOptions, TemporalResult } from 'lib/api/temporal';
 import type { WorkbookModel } from 'lib/types';
@@ -29,11 +30,11 @@ export function temporalInputError(o: TemporalOptions): string | null {
 }
 
 export function TemporalClusterPanel({ onTemporalPreview, onTemporalApply, onSetWeightingsFromSpacing, onStatus }: Props) {
-  const [method, setMethod] = useState<TemporalMethod>('resample');
-  const [offset, setOffset] = useState('3h');
-  const [dropLeapDay, setDropLeapDay] = useState(false);
-  const [stride, setStride] = useState('2');
-  const [segments, setSegments] = useState('24');
+  const [method, setMethod] = usePersistedState<TemporalMethod>('ui:forge:temporal-cluster:method', 'resample');
+  const [offset, setOffset] = usePersistedState('ui:forge:temporal-cluster:offset', '3h');
+  const [dropLeapDay, setDropLeapDay] = usePersistedState('ui:forge:temporal-cluster:drop-leap-day', false);
+  const [stride, setStride] = usePersistedState('ui:forge:temporal-cluster:stride', '2');
+  const [segments, setSegments] = usePersistedState('ui:forge:temporal-cluster:segments', '24');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TemporalResult | null>(null);

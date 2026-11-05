@@ -3,6 +3,7 @@
  * BESS cycles, H2 share and CO2 avoided, LCOH) and, for a P2X chain, the levelised-cost waterfall, RFNBO compliance and dispatch.
  * Both read the server (`/api/build/plant/results/{run}`, `/api/p2x/results/{run}`); nothing is computed here.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React from 'react';
 import type { WorkbookModel } from 'lib/types';
 import { fetchReportRuns } from 'lib/api/reports';
@@ -13,8 +14,8 @@ import { pathwayPeriodsOf } from './pathway';
 
 export function ResultsSection({ model, currencySymbol }: { model: WorkbookModel; currencySymbol?: string }) {
   const [runs, setRuns] = React.useState<ReportRunOption[]>([]);
-  const [run, setRun] = React.useState('');
-  const [period, setPeriod] = React.useState('');
+  const [run, setRun] = usePersistedState('ui:composites:results:run', '');
+  const [period, setPeriod] = usePersistedState('ui:composites:results:period', '');
   const [error, setError] = React.useState<string | null>(null);
   const hasP2x = (model.RAGNAROK_P2X?.length ?? 0) > 0;
   const pathway = React.useMemo(() => pathwayPeriodsOf(runs.find((r) => r.name === run)), [runs, run]);
@@ -22,13 +23,13 @@ export function ResultsSection({ model, currencySymbol }: { model: WorkbookModel
   React.useEffect(() => {
     let live = true;
     fetchReportRuns()
-      .then((list) => { if (live) { setRuns(list); setRun((cur) => cur || list[0]?.name || ''); } })
+      .then((list) => { if (live) { setRuns(list); setRun((cur) => (cur && list.some((r) => r.name === cur) ? cur : list[0]?.name || '')); } })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
-  }, []);
+  }, [setRun]);
   React.useEffect(() => {
     if (!pathway.isPathway || (period !== '' && !pathway.periods.includes(Number(period)))) setPeriod('');
-  }, [pathway, period]);
+  }, [pathway, period, setPeriod]);
 
   return (
     <div className="cmp-results" data-testid="composite-results">

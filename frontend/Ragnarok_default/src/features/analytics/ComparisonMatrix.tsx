@@ -16,6 +16,7 @@
  * arrived shows a loading placeholder, a failed request shows the error.
  */
 import React, { useMemo, useState } from 'react';
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import type { EChartsCoreOption } from 'echarts/core';
 import { MixItem, SummaryItem } from 'lib/types';
 import type { ComparisonEntry, ComparisonTopicId, LabelledValue } from 'lib/api/resultsDerived';
@@ -324,7 +325,7 @@ export function ComparisonMatrix({ scenarios, status, activeRunName, currencySym
   onToggleTopic: (id: string) => void;
   onReorder: (names: string[]) => void;
 }) {
-  const [settings, setSettings] = useState<Record<string, TopicSettings>>(() => Object.fromEntries(TOPICS.map((t) => [t.id, t.defaults])));
+  const [settings, setSettings] = usePersistedState<Record<string, TopicSettings>>('ui:comparison:topic-settings', Object.fromEntries(TOPICS.map((t) => [t.id, t.defaults])));
   const [dragName, setDragName] = useState<string | null>(null);
 
   const gridTemplate = `repeat(${scenarios.length}, minmax(0, 1fr)) var(--cmp-legend-w, 168px)`;
@@ -382,7 +383,7 @@ export function ComparisonMatrix({ scenarios, status, activeRunName, currencySym
           topic={t}
           scenarios={scenarios}
           status={status}
-          settings={settings[t.id]}
+          settings={settings[t.id] ?? t.defaults}
           onSettings={(s) => setSettings((prev) => ({ ...prev, [t.id]: s }))}
           currencySymbol={currencySymbol}
           gridTemplate={gridTemplate}

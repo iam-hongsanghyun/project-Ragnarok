@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
+import React from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip } from 'react-leaflet';
 import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 import { LatLngBoundsExpression } from 'leaflet';
@@ -43,7 +44,7 @@ function resolveCoords(
 }
 
 export function MapPane({ model, bounds, busIndex }: Props) {
-  const [visibleLayers, setVisibleLayers] = useState<Record<LayerKey, boolean>>({
+  const [visibleLayers, setVisibleLayers] = usePersistedState<Record<LayerKey, boolean>>('ui:map:visible-layers', {
     buses: true, generators: true, lines: true, links: true, transformers: true,
   });
   const toggleLayer = (key: LayerKey) =>

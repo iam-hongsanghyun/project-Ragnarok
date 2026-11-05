@@ -6,6 +6,7 @@
  * rating, all other months the winter rating) and leaves `s_nom` unchanged. The
  * math runs in PyPSA — this is the thin UI. Needs datetime snapshots.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useMemo, useState } from 'react';
 import type { WorkbookModel } from 'lib/types';
 
@@ -60,9 +61,9 @@ export function parseMonths(text: string): number[] {
 
 export function SeasonalRatingPanel({ model, onApplySeasonalRating, onStatus }: Props) {
   const lines = useMemo(() => model.lines ?? [], [model.lines]);
-  const [rows, setRows] = useState<Record<string, { summer: string; winter: string }>>({});
-  const [monthsText, setMonthsText] = useState('4-9');
-  const [compose, setCompose] = useState(true);
+  const [rows, setRows] = usePersistedState<Record<string, { summer: string; winter: string }>>('ui:forge:seasonal-rating:rows', {});
+  const [monthsText, setMonthsText] = usePersistedState('ui:forge:seasonal-rating:months-text', '4-9');
+  const [compose, setCompose] = usePersistedState('ui:forge:seasonal-rating:compose', true);
   const [busy, setBusy] = useState(false);
 
   const months = useMemo(() => parseMonths(monthsText), [monthsText]);

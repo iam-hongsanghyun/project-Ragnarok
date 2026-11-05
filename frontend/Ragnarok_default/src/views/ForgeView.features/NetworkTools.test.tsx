@@ -8,7 +8,8 @@ import { defaultSamplingConfig } from 'lib/results/sampling';
 import { button, click, mount, setValue, stubFetch, type Mounted } from '../../shared/testing/dom';
 
 let mounted: Mounted | null = null;
-afterEach(async () => { await mounted?.unmount(); mounted = null; });
+// Panel inputs persist in localStorage (saved with the project); isolate each test.
+afterEach(async () => { await mounted?.unmount(); mounted = null; window.localStorage.clear(); });
 
 const counts = (s: number, b: number) => ({ snapshots: s, buses: b, weightedHours: s });
 const reduced = { buses: [{ name: 'a' }] };

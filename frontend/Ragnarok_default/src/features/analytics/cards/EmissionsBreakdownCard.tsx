@@ -8,7 +8,8 @@
  *   intensity_kg_mwh → kg CO₂e / MWh (emission factor)
  */
 
-import React, { useState } from 'react';
+import React from 'react';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { CarrierEmission, EmissionsBreakdown, GeneratorEmission } from 'lib/types';
 import { carrierColor } from 'lib/utils/helpers';
 import type { ResultTotals } from 'lib/api/resultsDerived';
@@ -17,6 +18,8 @@ interface Props {
   data: EmissionsBreakdown;
   /** Server totals and carrier shares (`analysis/totals`); null while loading. */
   totals?: ResultTotals['emissions'];
+  /** Card id; scopes the saved table choices to this card. */
+  instanceId?: string;
 }
 
 // ── Carrier bar chart ─────────────────────────────────────────────────────────
@@ -60,10 +63,11 @@ function CarrierBars({ carriers, sharePct }: { carriers: CarrierEmission[]; shar
 
 type SortKey = 'emissions_tco2' | 'energy_mwh' | 'intensity_kg_mwh' | 'name' | 'carrier';
 
-function GeneratorTable({ generators }: { generators: GeneratorEmission[] }) {
-  const [sortKey, setSortKey] = useState<SortKey>('emissions_tco2');
-  const [sortAsc, setSortAsc] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+function GeneratorTable({ generators, instanceId }: { generators: GeneratorEmission[]; instanceId: string }) {
+  const k = `ui:card:emissions-breakdown:${instanceId}:`;
+  const [sortKey, setSortKey] = usePersistedState<SortKey>(`${k}sort-key`, 'emissions_tco2');
+  const [sortAsc, setSortAsc] = usePersistedState(`${k}sort-asc`, false);
+  const [showAll, setShowAll] = usePersistedState(`${k}show-all`, false);
 
   const sorted = [...generators].sort((a, b) => {
     const av = a[sortKey];
@@ -136,7 +140,7 @@ function GeneratorTable({ generators }: { generators: GeneratorEmission[] }) {
 
 // ── Main card ─────────────────────────────────────────────────────────────────
 
-export function EmissionsBreakdownCard({ data, totals = null }: Props) {
+export function EmissionsBreakdownCard({ data, totals = null, instanceId = 'default' }: Props) {
   const totalTco2 = totals?.totalTco2 ?? null;
   const avgIntensity = totals?.averageIntensityKgPerMwh ?? null;
   const sharePct = new Map((totals?.byCarrier ?? []).map((c) => [c.carrier, c.sharePct]));
@@ -183,7 +187,7 @@ export function EmissionsBreakdownCard({ data, totals = null }: Props) {
       {data.byGenerator.length > 0 && (
         <div className="ems-section">
           <h4 className="ems-section-title">By generator</h4>
-          <GeneratorTable generators={data.byGenerator} />
+          <GeneratorTable instanceId={instanceId} generators={data.byGenerator} />
         </div>
       )}
     </div>

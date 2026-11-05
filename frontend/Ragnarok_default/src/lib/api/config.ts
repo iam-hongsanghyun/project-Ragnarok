@@ -1,3 +1,4 @@
+import { API_BASE } from 'lib/constants/config';
 /**
  * Boot-bundle client.
  *
@@ -88,7 +89,7 @@ export interface StartupStatus {
  * be reached (which the caller treats as "still starting").
  */
 export async function fetchStartupStatus(): Promise<StartupStatus> {
-  const resp = await fetch('/api/status');
+  const resp = await fetch(`${API_BASE}/api/status`);
   if (!resp.ok) {
     throw new Error(`GET /api/status failed (${resp.status})`);
   }
@@ -130,7 +131,7 @@ function writeCache(bundle: ConfigBundle): void {
  * Used to decide whether the cached bundle is current.
  */
 async function fetchBuildId(): Promise<{ build_id: string; backend_version: string }> {
-  const resp = await fetch('/api/config/build-id');
+  const resp = await fetch(`${API_BASE}/api/config/build-id`);
   if (!resp.ok) {
     throw new Error(`GET /api/config/build-id failed (${resp.status})`);
   }
@@ -138,7 +139,7 @@ async function fetchBuildId(): Promise<{ build_id: string; backend_version: stri
 }
 
 async function fetchFullBundle(): Promise<ConfigBundle> {
-  const resp = await fetch('/api/config');
+  const resp = await fetch(`${API_BASE}/api/config`);
   if (!resp.ok) {
     throw new Error(`GET /api/config failed (${resp.status})`);
   }

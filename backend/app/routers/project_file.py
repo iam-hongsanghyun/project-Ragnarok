@@ -8,6 +8,7 @@ without touching any session (what an agent or another tool uses to author a pro
     POST /api/project-file?session_id=...        <- upload a project.db; it becomes the session's project
     POST /api/project-file/build                 -> a project.db built from {model, appState?, ...} (download)
     GET  /api/project-file/guide                 -> the format specification (markdown)
+    GET  /api/project-file/template?format=xlsx  -> the template: a runnable example to fill in (xlsx or db)
 """
 from __future__ import annotations
 
@@ -120,3 +121,25 @@ def guide() -> dict:
     if not _GUIDE.exists():
         raise HTTPException(status_code=404, detail="docs/project-file.md is not in this checkout.")
     return {"path": "docs/project-file.md", "markdown": _GUIDE.read_text(encoding="utf-8")}
+
+
+@router.get("/template")
+def template(format: str = Query("xlsx")) -> Response:
+    """The project template: a small model that runs as it is, with every sheet a person fills in - the model, the
+    run settings (``RAGNAROK_RunSettings``) and period limits (``RAGNAROK_PeriodBudgets``). ``format`` = xlsx (fill
+    in Excel) or db (a project file)."""
+    from .. import project_template
+
+    fmt = format.lower().strip()
+    if fmt == "xlsx":
+        return Response(
+            content=project_template.template_xlsx(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="ragnarok_template.xlsx"'},
+        )
+    if fmt == "db":
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "project.db"
+            sqlite_store.build_file(project_template.template_model(), dest, filename="ragnarok_template")
+            return _file_response(dest, "ragnarok_template.db")
+    raise HTTPException(status_code=400, detail="format must be xlsx or db.")

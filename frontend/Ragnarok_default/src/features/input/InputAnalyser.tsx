@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
+import React, { useEffect, useMemo } from 'react';
 import type { EChartsCoreOption } from 'echarts/core';
 import { GridRow } from 'lib/types';
 import { stringValue } from 'lib/utils/helpers';
@@ -355,15 +356,15 @@ export function InputAnalyser({ sheet, rows, cols, isTs, frozenCol, currencySymb
   );
 
   // ── Static controls ────────────────────────────────────────────────────────
-  const [valueCol,  setValueCol]  = useState('');
-  const [groupCol,  setGroupCol]  = useState('none');
-  const [scatterY,  setScatterY]  = useState('');
-  const [agg,       setAgg]       = useState<AggMethod>('sum');
-  const [staticChart, setStaticChart] = useState<StaticChart>('bar');
+  const [valueCol,  setValueCol]  = usePersistedState('ui:input-analyser:value-col', '');
+  const [groupCol,  setGroupCol]  = usePersistedState('ui:input-analyser:group-col', 'none');
+  const [scatterY,  setScatterY]  = usePersistedState('ui:input-analyser:scatter-y', '');
+  const [agg,       setAgg]       = usePersistedState<AggMethod>('ui:input-analyser:agg', 'sum');
+  const [staticChart, setStaticChart] = usePersistedState<StaticChart>('ui:input-analyser:static-chart', 'bar');
 
   // ── TS controls ────────────────────────────────────────────────────────────
-  const [tsSeries,  setTsSeries]  = useState('__all__');
-  const [tsChart,   setTsChart]   = useState<TsChart>('line');
+  const [tsSeries,  setTsSeries]  = usePersistedState('ui:input-analyser:ts-series', '__all__');
+  const [tsChart,   setTsChart]   = usePersistedState<TsChart>('ui:input-analyser:ts-chart', 'line');
 
   // "Analyse column" preselects the right control for the requested column.
   useEffect(() => {
@@ -373,7 +374,7 @@ export function InputAnalyser({ sheet, rows, cols, isTs, frozenCol, currencySymb
     } else if (numericCols.includes(focusCol)) {
       setValueCol(focusCol);
     }
-  }, [focusCol, isTs, tsCols, numericCols]);
+  }, [focusCol, isTs, tsCols, numericCols, setTsSeries, setValueCol]);
 
   // ── Static derived values (hooks must be unconditional) ───────────────────
   const nameCol     = frozenCol ?? cols[0] ?? '';

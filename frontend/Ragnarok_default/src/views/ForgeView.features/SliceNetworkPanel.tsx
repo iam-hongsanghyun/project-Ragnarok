@@ -4,6 +4,7 @@
  * Keep a snapshot window (labels, both ends inclusive) and/or a set of buses together with every component fully
  * attached to them. Preview reports the effect on the session copy; Apply replaces the working model.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useMemo, useState } from 'react';
 import { SearchableMultiSelect } from 'shared/components/SearchableMultiSelect';
 import { describeChange, postSlice, type TransformResult } from 'lib/api/networkOps';
@@ -23,9 +24,9 @@ function column(model: WorkbookModel, sheet: string, key: string): string[] {
 export function SliceNetworkPanel({ model, onSessionSync, onReplaceModel, onStatus }: Props) {
   const snapshots = useMemo(() => column(model, 'snapshots', 'snapshot'), [model]);
   const busNames = useMemo(() => column(model, 'buses', 'name'), [model]);
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
-  const [buses, setBuses] = useState<string[]>([]);
+  const [start, setStart] = usePersistedState('ui:forge:slice-network:start', '');
+  const [end, setEnd] = usePersistedState('ui:forge:slice-network:end', '');
+  const [buses, setBuses] = usePersistedState<string[]>('ui:forge:slice-network:buses', []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TransformResult | null>(null);

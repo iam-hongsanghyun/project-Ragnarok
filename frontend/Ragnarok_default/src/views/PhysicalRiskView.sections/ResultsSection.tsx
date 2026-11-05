@@ -11,7 +11,8 @@
  * callback ever fires setState on an unmounted section. Here we only hold the
  * local input drafts (perils, scenario) and delegate execution via `onRun`.
  */
-import React, { useState } from 'react';
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
+import React from 'react';
 import { SearchableMultiSelect } from '../../shared/components/SearchableMultiSelect';
 import { FreqCurveChart } from '../../features/physicalRisk/FreqCurveChart';
 import { Libraries, PhysicalRunResult, Portfolio, Run, Scenario } from 'lib/physicalRisk/types';
@@ -78,8 +79,8 @@ function PerilResultCard({ result, currencySymbol }: { result: PhysicalRunResult
 }
 
 export function ResultsSection({ portfolio, libraries, run, submitting, onRun }: Props) {
-  const [perils, setPerils] = useState<string[]>([]);
-  const [scenario, setScenario] = useState<Scenario>({ rcp: 'rcp45', horizon: 2050 });
+  const [perils, setPerils] = usePersistedState<string[]>('ui:physical-risk:results:perils', []);
+  const [scenario, setScenario] = usePersistedState<Scenario>('ui:physical-risk:results:scenario', { rcp: 'rcp45', horizon: 2050 });
 
   const running = run?.status === 'queued' || run?.status === 'running';
   const perilOptions = libraries?.perils.map((p) => ({ value: p.id, label: p.label })) ?? [];

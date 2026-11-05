@@ -5,6 +5,7 @@
  * must be unique across the two (the backend answers 400 with the collision otherwise). Preview shows the merged
  * totals; Apply replaces the working model.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useState } from 'react';
 import { describeChange, postMerge, type MergeRequest, type TransformResult } from 'lib/api/networkOps';
 import type { BackendRunMeta, WorkbookModel } from 'lib/types';
@@ -24,11 +25,11 @@ export function parseSkipList(text: string): string[] {
 }
 
 export function MergeNetworkPanel({ runs, onSessionSync, onReplaceModel, onStatus }: Props) {
-  const [sourceKind, setSourceKind] = useState<SourceKind>('run');
-  const [runName, setRunName] = useState('');
-  const [sessionId, setSessionId] = useState('');
-  const [skip, setSkip] = useState('');
-  const [withTime, setWithTime] = useState(true);
+  const [sourceKind, setSourceKind] = usePersistedState<SourceKind>('ui:forge:merge-network:source-kind', 'run');
+  const [runName, setRunName] = usePersistedState('ui:forge:merge-network:run-name', '');
+  const [sessionId, setSessionId] = usePersistedState('ui:forge:merge-network:session-id', '');
+  const [skip, setSkip] = usePersistedState('ui:forge:merge-network:skip', '');
+  const [withTime, setWithTime] = usePersistedState('ui:forge:merge-network:with-time', true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TransformResult | null>(null);

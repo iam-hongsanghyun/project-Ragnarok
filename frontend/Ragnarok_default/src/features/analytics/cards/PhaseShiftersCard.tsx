@@ -7,7 +7,8 @@
  * at a bound (a binding phase shifter); the chart plots the chosen angle over the
  * horizon against the bounds for the selected transformer.
  */
-import React, { useState } from 'react';
+import React from 'react';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { PhaseShiftersResult, PhaseShifterRow } from 'lib/types';
 
 const deg = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 3 });
@@ -51,11 +52,13 @@ function SeriesChart({ row }: { row: PhaseShifterRow }) {
 
 interface Props {
   data: PhaseShiftersResult;
+  /** Card id; scopes the saved selection to this card. */
+  instanceId?: string;
 }
 
-export function PhaseShiftersCard({ data }: Props) {
+export function PhaseShiftersCard({ data, instanceId = 'default' }: Props) {
   const rows = data.transformers;
-  const [selected, setSelected] = useState<string>(rows[0]?.name ?? '');
+  const [selected, setSelected] = usePersistedState<string>(`ui:card:phase-shifters:${instanceId}:selected`, rows[0]?.name ?? '');
   if (!rows.length) return <p className="dashboard-cell-missing">No optimised phase shifters in this run.</p>;
   const current = rows.find((r) => r.name === selected) ?? rows[0];
   return (

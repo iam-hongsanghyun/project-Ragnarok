@@ -13,6 +13,7 @@
  * `run` owned by the view) — a module-level cache holds the in-flight/last
  * run per portfolio session and this component rehydrates from it on mount.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useToast } from '../../shared/components/Toast';
 import { RUN_POLLING } from 'lib/constants';
@@ -32,7 +33,7 @@ const DEFAULT_MEASURES: MeasureSpec[] = [
 // Module-level cache keyed by session id: survives this section unmounting on
 // sub-tab switch (the view itself does not own an adaptation run, unlike the
 // physical `run` in Results). Rehydrated on mount, updated on every submit/poll.
-const cache = new Map<string, { measures: MeasureSpec[]; run: Run | null }>();
+const cache = new Map<string, { run: Run | null }>();
 
 function Kpi({ label, value }: { label: string; value: string }) {
   return (
@@ -48,7 +49,8 @@ export function AdaptationSection({ portfolio }: PhysicalRiskSectionProps) {
   const sessionId = portfolio?.sessionId ?? null;
   const cached = sessionId ? cache.get(sessionId) : undefined;
 
-  const [measures, setMeasures] = useState<MeasureSpec[]>(cached?.measures ?? DEFAULT_MEASURES);
+  // The measures are a user setting: saved in the project, not held in the module cache.
+  const [measures, setMeasures] = usePersistedState<MeasureSpec[]>('ui:physical-risk:adaptation-measures', DEFAULT_MEASURES);
   const [run, setRun] = useState<Run | null>(cached?.run ?? null);
   const [submitting, setSubmitting] = useState(false);
   const pollTimer = useRef<number | null>(null);
@@ -66,19 +68,15 @@ export function AdaptationSection({ portfolio }: PhysicalRiskSectionProps) {
     };
   }, []);
 
-  const persist = useCallback((next: Partial<{ measures: MeasureSpec[]; run: Run | null }>) => {
+  const persist = useCallback((next: Partial<{ run: Run | null }>) => {
     if (!sessionId) return;
-    const entry = cache.get(sessionId) ?? { measures: DEFAULT_MEASURES, run: null };
+    const entry = cache.get(sessionId) ?? { run: null };
     cache.set(sessionId, { ...entry, ...next });
   }, [sessionId]);
 
   const updateMeasures = useCallback((updater: (ms: MeasureSpec[]) => MeasureSpec[]) => {
-    setMeasures((prev) => {
-      const next = updater(prev);
-      persist({ measures: next });
-      return next;
-    });
-  }, [persist]);
+    setMeasures((prev) => updater(prev));
+  }, [setMeasures]);
 
   const pollRun = useCallback((sid: string, runId: string) => {
     const poll = () => {
@@ -116,7 +114,6 @@ export function AdaptationSection({ portfolio }: PhysicalRiskSectionProps) {
   useEffect(() => {
     if (!sessionId) return;
     const entry = cache.get(sessionId);
-    setMeasures(entry?.measures ?? DEFAULT_MEASURES);
     setRun(entry?.run ?? null);
     if (entry?.run && (entry.run.status === 'queued' || entry.run.status === 'running')) {
       pollRun(sessionId, entry.run.id);

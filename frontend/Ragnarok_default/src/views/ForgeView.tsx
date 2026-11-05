@@ -300,9 +300,9 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   const sheetsWithRows = useMemo(() => nonEmptySheets(model), [model]);
 
   // ── Operation 1: Round / Ceil / Floor ──────────────────────────────────
-  const [roundSheet, setRoundSheet] = useState<string>('');
-  const [roundAttrs, setRoundAttrs] = useState<string[]>([]);
-  const [roundOp, setRoundOp] = useState<RoundOp>('round');
+  const [roundSheet, setRoundSheet] = usePersistedState<string>('ui:forge:round-sheet', '');
+  const [roundAttrs, setRoundAttrs] = usePersistedState<string[]>('ui:forge:round-attrs', []);
+  const [roundOp, setRoundOp] = usePersistedState<RoundOp>('ui:forge:round-op', 'round');
   const [decimals, setDecimals] = usePersistedState<number>('ui:forge-decimals', FORGE_CONFIG.defaultRoundDecimals);
 
   const activeRoundSheet = roundSheet && sheetsWithRows.includes(roundSheet) ? roundSheet : (sheetsWithRows[0] ?? '');
@@ -327,8 +327,8 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   };
 
   // ── Operation 2: Snap to nearest bus ────────────────────────────────────
-  const [overlaySel, setOverlaySel] = useState<string[]>([]);
-  const [bufferKm, setBufferKm] = useState<number>(FORGE_CONFIG.defaultBufferKm);
+  const [overlaySel, setOverlaySel] = usePersistedState<string[]>('ui:forge:overlay-sel', []);
+  const [bufferKm, setBufferKm] = usePersistedState<number>('ui:forge:buffer-km', FORGE_CONFIG.defaultBufferKm);
   const [snapReport, setSnapReport] = useState<
     { assigned: number; outside: OutsideEntry[]; noCoords: number; perSheet: Array<{ sheet: string; anchors: string[]; assigned: number }> } | null
   >(null);
@@ -373,29 +373,26 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   // ── Operation 4: Reduce / cluster network ───────────────────────────────
   const busCount = rowsOf(model, 'buses').length;
   const defaultClusterN = Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.round(busCount / 2)));
-  const [clusterN, setClusterN] = useState<number | null>(null);
-  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans' | 'hac' | 'column' | 'single'>('modularity');
-  const [clusterHac, setClusterHac] = useState<HacOptionsValue>(DEFAULT_HAC);
-  const [clusterResolveConflicts, setClusterResolveConflicts] = useState(true);
-  const [clusterConflictStrategy, setClusterConflictStrategy] = useState<'mean' | 'max' | 'min' | 'zero' | 'default'>('mean');
+  const [clusterN, setClusterN] = usePersistedState<number | null>('ui:forge:cluster-n', null);
+  const [clusterMethod, setClusterMethod] = usePersistedState<'modularity' | 'kmeans' | 'hac' | 'column' | 'single'>('ui:forge:cluster-method', 'modularity');
+  const [clusterHac, setClusterHac] = usePersistedState<HacOptionsValue>('ui:forge:cluster-hac', DEFAULT_HAC);
+  const [clusterResolveConflicts, setClusterResolveConflicts] = usePersistedState('ui:forge:cluster-resolve-conflicts', true);
+  const [clusterConflictStrategy, setClusterConflictStrategy] = usePersistedState<'mean' | 'max' | 'min' | 'zero' | 'default'>('ui:forge:cluster-conflict-strategy', 'mean');
   const [clusterBusy, setClusterBusy] = useState(false);
   const [clusterResult, setClusterResult] = useState<ClusterResult | null>(null);
   const [clusterError, setClusterError] = useState<string | null>(null);
   const effClusterN = clusterN ?? defaultClusterN;
   // Aggregate-by-column: which bus column to group on.
   const busCols = busColumns(rowsOf(model, 'buses'));
-  const [clusterColumn, setClusterColumn] = useState<string>('');
+  const [clusterColumn, setClusterColumn] = usePersistedState<string>('ui:forge:cluster-column', '');
   const effClusterColumn = clusterColumn || busCols[0] || '';
   // Aggregate one-port components by carrier per merged bus (off by default).
-  const [aggComponents, setAggComponents] = useState(false);
-  const [aggSelected, setAggSelected] = useState<Set<string>>(() => new Set(AGGREGATABLE_COMPONENTS.map((c) => c.id)));
+  const [aggComponents, setAggComponents] = usePersistedState('ui:forge:agg-components', false);
+  // Persisted as an array (a Set is not JSON); read as a Set at the boundary.
+  const [aggSelectedIds, setAggSelectedIds] = usePersistedState<string[]>('ui:forge:agg-selected', AGGREGATABLE_COMPONENTS.map((c) => c.id));
+  const aggSelected = useMemo(() => new Set(aggSelectedIds), [aggSelectedIds]);
   const toggleAggComponent = (id: string) =>
-    setAggSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setAggSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const runClusterPreview = async () => {
     if (!onClusterPreview) return;
@@ -474,26 +471,26 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   }, [model]);
   const suggestedOffset = fleetLon == null ? 0 : Math.max(-12, Math.min(14, Math.round(fleetLon / 15)));
 
-  const [renewSource, setRenewSource] = useState<'open-meteo' | 'pvgis' | 'nasa-power'>('open-meteo');
-  const [renewFrom, setRenewFrom] = useState('2019-01-01');
-  const [renewTo, setRenewTo] = useState('2019-01-31');
-  const [renewPr, setRenewPr] = useState(0.9);
-  const [renewOffset, setRenewOffset] = useState(0);
+  const [renewSource, setRenewSource] = usePersistedState<'open-meteo' | 'pvgis' | 'nasa-power'>('ui:forge:renew-source', 'open-meteo');
+  const [renewFrom, setRenewFrom] = usePersistedState('ui:forge:renew-from', '2019-01-01');
+  const [renewTo, setRenewTo] = usePersistedState('ui:forge:renew-to', '2019-01-31');
+  const [renewPr, setRenewPr] = usePersistedState('ui:forge:renew-pr', 0.9);
+  const [renewOffset, setRenewOffset] = usePersistedState('ui:forge:renew-offset', 0);
   const [renewBusy, setRenewBusy] = useState(false);
   const [renewResult, setRenewResult] = useState<AttachProfilesResult | null>(null);
   const [renewError, setRenewError] = useState<string | null>(null);
   // Which carriers are solar / which are wind — seeded from the auto guess, then
   // freely editable via the searchable multi-selects. Reseed when the model's
   // carrier set changes.
-  const [solarCarriers, setSolarCarriers] = useState<string[]>([]);
-  const [windCarriers, setWindCarriers] = useState<string[]>([]);
+  const [solarCarriers, setSolarCarriers] = usePersistedState<string[]>('ui:forge:solar-carriers', []);
+  const [windCarriers, setWindCarriers] = usePersistedState<string[]>('ui:forge:wind-carriers', []);
   const carrierKey = carrierNames.join('|');
   useEffect(() => {
     setSolarCarriers(genCarriers.filter((c) => c.auto === 'solar').map((c) => c.carrier));
     setWindCarriers(genCarriers.filter((c) => c.auto === 'wind').map((c) => c.carrier));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [carrierKey]);
-  useEffect(() => { setRenewOffset(suggestedOffset); }, [suggestedOffset]);
+  useEffect(() => { setRenewOffset(suggestedOffset); }, [suggestedOffset, setRenewOffset]);
 
   const renewableGenCount = useMemo(() => {
     const picked = new Set([...solarCarriers, ...windCarriers]);
@@ -522,28 +519,28 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   };
 
   // ── Operation 6/7: Temporal — retarget window + forecast to a future year ──
-  const [tStart, setTStart] = useState('2025-01-01');
-  const [tEnd, setTEnd] = useState('2025-12-31 23:00');
-  const [tStep, setTStep] = useState(1);
-  const [tFill, setTFill] = useState<'tile' | 'pad'>('tile');
-  const [fFrom, setFFrom] = useState(2025);
-  const [fTo, setFTo] = useState(2035);
-  const [fGrowth, setFGrowth] = useState(2);
-  const [fMethod, setFMethod] = useState<'cagr' | 'linear' | 'regression' | 'arima' | 'prophet'>('cagr');
+  const [tStart, setTStart] = usePersistedState('ui:forge:t-start', '2025-01-01');
+  const [tEnd, setTEnd] = usePersistedState('ui:forge:t-end', '2025-12-31 23:00');
+  const [tStep, setTStep] = usePersistedState('ui:forge:t-step', 1);
+  const [tFill, setTFill] = usePersistedState<'tile' | 'pad'>('ui:forge:t-fill', 'tile');
+  const [fFrom, setFFrom] = usePersistedState('ui:forge:forecast-from', 2025);
+  const [fTo, setFTo] = usePersistedState('ui:forge:forecast-to', 2035);
+  const [fGrowth, setFGrowth] = usePersistedState('ui:forge:forecast-growth', 2);
+  const [fMethod, setFMethod] = usePersistedState<'cagr' | 'linear' | 'regression' | 'arima' | 'prophet'>('ui:forge:forecast-method', 'cagr');
   const [tempBusy, setTempBusy] = useState(false);
   const [tempError, setTempError] = useState<string | null>(null);
   // I3 driver-forecast inputs.
-  const [dPop, setDPop] = useState(0.5);
-  const [dGdp, setDGdp] = useState(2.0);
-  const [dElas, setDElas] = useState(0.5);
-  const [dHeat, setDHeat] = useState(0);
-  const [dEv, setDEv] = useState(0);
+  const [dPop, setDPop] = usePersistedState('ui:forge:demand-pop', 0.5);
+  const [dGdp, setDGdp] = usePersistedState('ui:forge:demand-gdp', 2.0);
+  const [dElas, setDElas] = usePersistedState('ui:forge:demand-elasticity', 0.5);
+  const [dHeat, setDHeat] = usePersistedState('ui:forge:demand-heat', 0);
+  const [dEv, setDEv] = usePersistedState('ui:forge:demand-ev', 0);
 
   // I4 hydro-inflow inputs.
-  const [hiFrom, setHiFrom] = useState('2019-01-01');
-  const [hiTo, setHiTo] = useState('2019-12-31');
-  const [hiCf, setHiCf] = useState(0.35);
-  const [hiUtc, setHiUtc] = useState(0);
+  const [hiFrom, setHiFrom] = usePersistedState('ui:forge:hydro-inflow-from', '2019-01-01');
+  const [hiTo, setHiTo] = usePersistedState('ui:forge:hydro-inflow-to', '2019-12-31');
+  const [hiCf, setHiCf] = usePersistedState('ui:forge:hydro-inflow-cf', 0.35);
+  const [hiUtc, setHiUtc] = usePersistedState('ui:forge:hydro-inflow-utc', 0);
   const [hiResult, setHiResult] = useState<string | null>(null);
   // Distinct carriers present on the storage_units sheet — the picker options.
   const storageCarriers = useMemo(() => {
@@ -557,7 +554,7 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   // The user picks which storage carriers count as hydro (the name-hint
   // classifier misses non-English / custom names). Seeded with the obvious
   // hydro-like ones; PHS/pumped excluded from the seed.
-  const [hydroCarriers, setHydroCarriers] = useState<string[]>([]);
+  const [hydroCarriers, setHydroCarriers] = usePersistedState<string[]>('ui:forge:hydro-carriers', []);
   const storageCarrierKey = storageCarriers.join('|');
   useEffect(() => {
     setHydroCarriers(storageCarriers.filter((c) => {
@@ -585,9 +582,9 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   };
 
   // M4 EV-demand inputs.
-  const [evFleet, setEvFleet] = useState(100000);
-  const [evKwh, setEvKwh] = useState(7);
-  const [evHome, setEvHome] = useState(0.7);
+  const [evFleet, setEvFleet] = usePersistedState('ui:forge:ev-fleet', 100000);
+  const [evKwh, setEvKwh] = usePersistedState('ui:forge:ev-kwh', 7);
+  const [evHome, setEvHome] = usePersistedState('ui:forge:ev-home', 0.7);
 
   const runEvDemand = async () => {
     if (!onEvDemand) return;

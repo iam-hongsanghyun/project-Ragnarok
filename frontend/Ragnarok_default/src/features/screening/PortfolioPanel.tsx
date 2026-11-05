@@ -13,6 +13,7 @@
  * (hover, legend toggle, zoom). "Add selected sites to model" previews the
  * generators and the alignment of their profiles before anything is merged.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useEffect, useMemo, useState } from 'react';
 import { WorkbookFragment } from 'lib/api/databases';
 import {
@@ -60,14 +61,14 @@ export function PortfolioPanel({ params, sites, level, selected, siteColors, the
   const { showToast } = useToast();
   const regionLevel = level === 'region';
   const noun = regionLevel ? 'region' : 'site';
-  const [weights, setWeights] = useState<Record<string, number>>({});
-  const [lowThreshold, setLowThreshold] = useState(0.05);
-  const [worstN, setWorstN] = useState(100);
-  const [objective, setObjective] = useState<'min_variance' | 'max_mean'>('min_variance');
-  const [targetMean, setTargetMean] = useState('');
-  const [stdCap, setStdCap] = useState('');
-  const [maxWeight, setMaxWeight] = useState(1);
-  const [regionText, setRegionText] = useState('');
+  const [weights, setWeights] = usePersistedState<Record<string, number>>('ui:screening:portfolio:weights', {});
+  const [lowThreshold, setLowThreshold] = usePersistedState('ui:screening:portfolio:low-threshold', 0.05);
+  const [worstN, setWorstN] = usePersistedState('ui:screening:portfolio:worst-n', 100);
+  const [objective, setObjective] = usePersistedState<'min_variance' | 'max_mean'>('ui:screening:portfolio:objective', 'min_variance');
+  const [targetMean, setTargetMean] = usePersistedState('ui:screening:portfolio:target-mean', '');
+  const [stdCap, setStdCap] = usePersistedState('ui:screening:portfolio:std-cap', '');
+  const [maxWeight, setMaxWeight] = usePersistedState('ui:screening:portfolio:max-weight', 1);
+  const [regionText, setRegionText] = usePersistedState('ui:screening:portfolio:region-text', '');
   const [optimising, setOptimising] = useState(false);
   const [optError, setOptError] = useState<string | null>(null);
   const [optimised, setOptimised] = useState<OptimiseResponse | null>(null);
@@ -81,7 +82,7 @@ export function PortfolioPanel({ params, sites, level, selected, siteColors, the
       return next;
     });
     setOptimised(null);
-  }, [selected]);
+  }, [selected, setWeights]);
 
   const positive = useMemo(() => Object.fromEntries(Object.entries(weights).filter(([k, w]) => selected.includes(k) && w > 0)), [weights, selected]);
   const debouncedWeights = useDebouncedValue(positive, 350);
@@ -335,10 +336,10 @@ interface DialogProps {
 /** Preview of the generators and of how their profiles align with the model's snapshots, before the merge. */
 function PromoteDialog({ params, selected, sites, buses, targetSnapshots, currencySymbol, discountRate, onClose, onConfirm }: DialogProps) {
   const [utcOffset, setUtcOffset] = useState(params.utcOffsetHours);
-  const [extendable, setExtendable] = useState(false);
-  const [capex, setCapex] = useState<Record<string, number>>({});
-  const [pNom, setPNom] = useState<Record<string, string>>({});
-  const [marginal, setMarginal] = useState(0);
+  const [extendable, setExtendable] = usePersistedState('ui:screening:promote:extendable', false);
+  const [capex, setCapex] = usePersistedState<Record<string, number>>('ui:screening:promote:capex', {});
+  const [pNom, setPNom] = usePersistedState<Record<string, string>>('ui:screening:promote:p-nom', {});
+  const [marginal, setMarginal] = usePersistedState('ui:screening:promote:marginal', 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resp, setResp] = useState<PromoteResponse | null>(null);

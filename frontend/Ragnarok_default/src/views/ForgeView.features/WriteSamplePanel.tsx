@@ -6,6 +6,7 @@
  * returns the reduced workbook's size, the representation factor and the backend's notes; Apply replaces the working
  * model. Sample a workbook that already has the resolution you want (resolution is Temporal clustering's job).
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useState } from 'react';
 import { defaultSamplingConfig, normalizeSamplingConfig } from 'lib/results/sampling';
 import { postSample, type SampleResult } from 'lib/api/networkOps';
@@ -27,9 +28,9 @@ export function sampleInputError(cfg: SamplingConfig, start: string, count: stri
 }
 
 export function WriteSamplePanel({ onSessionSync, onReplaceModel, onStatus }: Props) {
-  const [cfg, setCfg] = useState<SamplingConfig>({ ...defaultSamplingConfig(), enabled: true });
-  const [windowStart, setWindowStart] = useState('');
-  const [windowCount, setWindowCount] = useState('');
+  const [cfg, setCfg] = usePersistedState<SamplingConfig>('ui:forge:write-sample:cfg', { ...defaultSamplingConfig(), enabled: true });
+  const [windowStart, setWindowStart] = usePersistedState('ui:forge:write-sample:window-start', '');
+  const [windowCount, setWindowCount] = usePersistedState('ui:forge:write-sample:window-count', '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SampleResult | null>(null);

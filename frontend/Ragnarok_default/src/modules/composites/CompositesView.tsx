@@ -3,6 +3,7 @@
  * them, and their results. Everything is built into the core model through the plant change set (`onApplyPlantChange`); the
  * results read stored runs. No separate engine.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React from 'react';
 import { TopTab, ViewPaneHeader, ViewPanel } from '../../shared/components/primitives';
 import type { TopTabItem } from '../../shared/components/primitives';
@@ -36,7 +37,7 @@ interface Props {
 }
 
 export function CompositesView({ model, discountRate, currencySymbol, onApplyPlantChange, focusPlantId, onFocusHandled }: Props) {
-  const [section, setSection] = React.useState<Section>('model');
+  const [section, setSection] = usePersistedState<Section>('ui:composites:section', 'model');
   const [editing, setEditing] = React.useState<PlantCard | null>(null);
   const [placeSource, setPlaceSource] = React.useState<PlantCard | null>(null);
 

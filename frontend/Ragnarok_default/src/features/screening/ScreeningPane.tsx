@@ -129,10 +129,10 @@ export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discount
     if (!list.data || list.data.tick !== tick) return;
     if (regionSource !== 'sites' && !regionDatasets.some((d) => d.id === regionSource)) setRegionSource('sites');
   }, [list.data, tick, regionDatasets, regionSource, setRegionSource]);
-  const [weighting, setWeighting] = useState<Weighting>('equal');
-  const [weightText, setWeightText] = useState('');
-  const [byTech, setByTech] = useState(false);
-  const [techFilter, setTechFilter] = useState<TechFilter>('all');
+  const [weighting, setWeighting] = usePersistedState<Weighting>('ui:screening:weighting', 'equal');
+  const [weightText, setWeightText] = usePersistedState('ui:screening:weight-text', '');
+  const [byTech, setByTech] = usePersistedState('ui:screening:by-tech', false);
+  const [techFilter, setTechFilter] = usePersistedState<TechFilter>('ui:screening:tech-filter', 'all');
   const regionLevel = level === 'region';
   const fromRegionDataset = regionLevel && regionSource !== 'sites';
   const dataId = regionLevel ? (fromRegionDataset ? regionSource : activeId) : activeId;
@@ -163,24 +163,24 @@ export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discount
   const siteNames = useMemo(() => new Set(units.map((s) => s.name)), [units]);
 
   // ── analysis controls ─────────────────────────────────────────────────
-  const [basis, setBasis] = useState<Basis>('daily');
-  const [rule, setRule] = useState('6h');
-  const [seasonText, setSeasonText] = useState('');
-  const [method, setMethod] = useState<CorrMethod>('pearson');
-  const [anomaly, setAnomaly] = useState(false);
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
-  const [monthsText, setMonthsText] = useState('');
-  const [utcOffset, setUtcOffset] = useState(0);
-  const [scope, setScope] = useState<Scope>('all');
-  const [k, setK] = useState(3);
-  const [refChoice, setRefChoice] = useState<RefChoice>('none');
-  const [refAlign, setRefAlign] = useState<'exact' | 'calendar'>('exact');
-  const [refOffset, setRefOffset] = useState(0);
-  const [colorMode, setColorMode] = useState<MapColorMode>('technology');
-  const [profileView, setProfileView] = useState<ProfileView>('diurnal');
-  const [maxLag, setMaxLag] = useState(48);
-  const [pickedSites, setSelected] = useState<string[]>([]);
+  const [basis, setBasis] = usePersistedState<Basis>('ui:screening:basis', 'daily');
+  const [rule, setRule] = usePersistedState('ui:screening:rule', '6h');
+  const [seasonText, setSeasonText] = usePersistedState('ui:screening:season-text', '');
+  const [method, setMethod] = usePersistedState<CorrMethod>('ui:screening:method', 'pearson');
+  const [anomaly, setAnomaly] = usePersistedState('ui:screening:anomaly', false);
+  const [start, setStart] = usePersistedState('ui:screening:start', '');
+  const [end, setEnd] = usePersistedState('ui:screening:end', '');
+  const [monthsText, setMonthsText] = usePersistedState('ui:screening:months-text', '');
+  const [utcOffset, setUtcOffset] = usePersistedState('ui:screening:utc-offset', 0);
+  const [scope, setScope] = usePersistedState<Scope>('ui:screening:scope', 'all');
+  const [k, setK] = usePersistedState('ui:screening:k', 3);
+  const [refChoice, setRefChoice] = usePersistedState<RefChoice>('ui:screening:ref-choice', 'none');
+  const [refAlign, setRefAlign] = usePersistedState<'exact' | 'calendar'>('ui:screening:ref-align', 'exact');
+  const [refOffset, setRefOffset] = usePersistedState('ui:screening:ref-offset', 0);
+  const [colorMode, setColorMode] = usePersistedState<MapColorMode>('ui:screening:color-mode', 'technology');
+  const [profileView, setProfileView] = usePersistedState<ProfileView>('ui:screening:profile-view', 'diurnal');
+  const [maxLag, setMaxLag] = usePersistedState('ui:screening:max-lag', 48);
+  const [pickedSites, setSelected] = usePersistedState<string[]>('ui:screening:picked-sites', []);
   const [pickedFocus, setFocus] = useState<string | null>(null);
   // Selection and focus are valid only for sites the active dataset has (switching datasets drops the rest).
   const selected = useMemo(() => pickedSites.filter((s) => siteNames.has(s)), [pickedSites, siteNames]);
@@ -299,7 +299,7 @@ export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discount
 
   const toggle = useCallback((name: string) => {
     setSelected((cur) => (cur.includes(name) ? cur.filter((s) => s !== name) : [...cur, name]));
-  }, []);
+  }, [setSelected]);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   // The ticked SITES (a region series has no place to site) with their envelope, for "Open in Siting".
   const selectedHandoff = useMemo(

@@ -366,8 +366,8 @@ def test_horizon_values_are_in_the_results_and_the_workbook_apply_writes_them() 
 # ── rolling horizon: PyPSA applies e_sum / constants to EACH window ──────────────
 
 def test_rolling_horizon_whole_horizon_energy_stays_within_the_budget() -> None:
-    """Written into the column, a 400 MWh budget would be allowed in full by each of 3 windows (up to 1200). The module
-    leaves the column unbounded and adds each window's share (committed hours / run hours) as a declared constraint."""
+    """Applied in full to each of 3 windows, a 400 MWh budget would allow up to 1200. The run turns the horizon total
+    into a period budget tracked window by window (constraints/period_budgets.py): each window gets what is left."""
     annual = 400.0 * 8760 / 24                                  # 400 MWh over this 24 h horizon
     m = _budget_model(24, annual)
     opts = {"enableLoadShedding": False, "rollingConfig": {"enabled": True, "horizonSnapshots": 8, "overlapSnapshots": 0}}
@@ -375,16 +375,19 @@ def test_rolling_horizon_whole_horizon_energy_stays_within_the_budget() -> None:
     energy = {g["name"]: g["value"] for g in res["generatorEnergy"]}
     assert energy["oil"] == pytest.approx(400.0, rel=1e-6)       # binds, and never exceeds the horizon budget
     assert res["annualBudgets"][0]["value"] == pytest.approx(400.0)
-    assert "split per rolling window" in res["annualBudgets"][0]["scope"]
-    # the same model without the module's split would have let every window spend 400: pinned by the column staying unbounded
-    n, _ = build_network(m, {}, {"rollingConfig": {"enabled": True, "horizonSnapshots": 8, "overlapSnapshots": 0}})
-    assert np.isinf(float(n.generators.at["oil", "e_sum_max"]))
+    assert "tracked per rolling window" in res["annualBudgets"][0]["scope"]
 
 
-def test_rolling_horizon_with_a_global_constraint_budget_is_refused_clearly() -> None:
-    from fastapi import HTTPException
+def test_rolling_horizon_with_a_global_constraint_budget_is_tracked() -> None:
+    """A CO2 cap from an annual budget used to refuse rolling horizon; now the cap is tracked per window and the run
+    emits exactly the horizon cap, as the single solve does."""
+    from backend.pypsa.utils.emissions import primary_energy_emissions  # noqa: F401  (same accounting as the single solve)
 
-    m = _co2_cap_model(24, 1_000_000.0)
-    with pytest.raises(HTTPException) as ei:
-        build_network(m, {}, {"rollingConfig": {"enabled": True, "horizonSnapshots": 8, "overlapSnapshots": 0}})
-    assert ei.value.status_code == 400 and "rolling horizon" in str(ei.value.detail) and "cap" in str(ei.value.detail)
+    m = _co2_cap_model(24, 1_000_000.0, load=400.0)
+    cap = 1_000_000.0 * 24 / 8760
+    opts = {"enableLoadShedding": False, "rollingConfig": {"enabled": True, "horizonSnapshots": 8, "overlapSnapshots": 0}}
+    res = run_pypsa(m, {"carbonPrice": 0.0, "discountRate": 0.0}, opts)
+    energy = {g["name"]: g["value"] for g in res["generatorEnergy"]}
+    assert energy.get("oil", 0.0) * 0.3 + energy.get("gas", 0.0) * 0.2 / 0.5 == pytest.approx(cap, rel=1e-6)
+
+

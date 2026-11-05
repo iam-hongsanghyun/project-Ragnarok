@@ -15,6 +15,8 @@ Endpoints::
     POST   /api/session/clear            -> {cleared: bool}
     GET    /api/session/app-state        -> {state: {key: value} | null}
     PUT    /api/session/app-state        -> {state: {key: value}} (every app setting of the project)
+    GET    /api/session/run-settings     -> {settings: [{setting, value, unit, default, choices, description}]}
+    PUT    /api/session/run-settings     -> the same, after writing {values: {setting: value}}
 
 ``session_id`` defaults to ``"default"`` (single-user, one machine). It is a
 first-class parameter everywhere so a remote, multi-session deployment is a
@@ -147,6 +149,46 @@ def put_app_state(payload: AppStatePayload) -> dict:
 
         events_bus.publish(payload.sessionId, "session.appState", {"keys": sorted(payload.state)})
     return {"state": state}
+
+
+class RunSettingsPayload(BaseModel):
+    """Body for ``PUT /api/session/run-settings``: ``values`` maps a setting (see ``GET``) to its value; ``null``
+    leaves a setting as it is. Open browsers re-apply the project's settings."""
+
+    values: dict[str, Any]
+    sessionId: str = "default"
+
+
+def _run_settings_context(session_id: str) -> tuple[dict[str, str], list[str], float, str]:
+    from .. import run_settings
+
+    state = model_store.get_app_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=409, detail="No project is loaded in this session; load or build a model first.")
+    static = model_store.load_full_model(session_id, static_only=True) or {}
+    meta = model_store.get_meta(session_id) or {}
+    return state, run_settings.snapshot_labels(static), run_settings.step_hours_of(static), str(meta.get("filename") or "")
+
+
+@router.get("/run-settings")
+def get_run_settings(session_id: str = Query("default", alias="session_id")) -> dict:
+    """The project's run settings as one table (``docs/project-file.md`` §8): what the run uses when it is started."""
+    from .. import run_settings
+
+    state, labels, _step, _name = _run_settings_context(session_id)
+    return {"settings": run_settings.table(state, labels), "sheet": run_settings.SHEET}
+
+
+@router.put("/run-settings")
+def put_run_settings(payload: RunSettingsPayload) -> dict:
+    """Write run settings into the project (validated; 400 names the valid input) and tell open browsers."""
+    from .. import events_bus, run_settings
+
+    state, labels, step, name = _run_settings_context(payload.sessionId)
+    new_state = run_settings.apply(state, payload.values, labels=labels, step_hours=step, filename=name or None)
+    model_store.set_app_state(payload.sessionId, new_state)
+    events_bus.publish(payload.sessionId, "session.appState", {"keys": sorted(payload.values)})
+    return {"settings": run_settings.table(new_state, labels), "sheet": run_settings.SHEET}
 
 
 @router.post("/migration/ack")

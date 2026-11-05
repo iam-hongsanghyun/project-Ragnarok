@@ -8,7 +8,8 @@
  *   active = build_year ≤ P < build_year + lifetime   (build_year ≤ 0 → always active)
  *   capacity = p_nom_opt if p_nom_extendable, else p_nom
  */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { GridRow, RunResults, TimeSeriesRow, WorkbookModel } from 'lib/types';
 import { carrierColor, hashColor, numberValue, resolvedColor, stringValue } from 'lib/utils/helpers';
 import { InteractiveTimeSeriesCard } from './InteractiveTimeSeriesCard';
@@ -16,6 +17,8 @@ import { InteractiveTimeSeriesCard } from './InteractiveTimeSeriesCard';
 interface Props {
   model: WorkbookModel;
   results: RunResults;
+  /** Card id; scopes the saved choice to this card. */
+  instanceId?: string;
 }
 
 type GroupMode = 'carrier' | 'generator';
@@ -64,8 +67,8 @@ function activeCapacity(g: GenSpec, period: number): number {
   return cap > 0 ? cap : 0;
 }
 
-export function CapacityByPeriodCard({ model, results }: Props) {
-  const [groupMode, setGroupMode] = useState<GroupMode>('carrier');
+export function CapacityByPeriodCard({ model, results, instanceId = 'default' }: Props) {
+  const [groupMode, setGroupMode] = usePersistedState<GroupMode>(`ui:card:capacity-by-period:${instanceId}:group-mode`, 'carrier');
 
   const periods = useMemo(() => results.pathway?.periods ?? [], [results.pathway]);
   const optStatic = useMemo(

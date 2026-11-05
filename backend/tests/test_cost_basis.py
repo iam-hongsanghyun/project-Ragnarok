@@ -48,7 +48,12 @@ def _raw_model(db: Path) -> dict[str, list[dict[str, Any]]]:
     bundled example files must not be touched, not even to switch their journal mode)."""
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        catalog = conn.execute("SELECT name, tbl FROM _sheets ORDER BY position").fetchall()
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = '_sheets'").fetchone():
+            catalog = conn.execute("SELECT name, tbl FROM _sheets ORDER BY position").fetchall()
+        else:  # a layout-1 fixture (_kv + sheet_<i>), kept as it was written
+            meta = json.loads(conn.execute("SELECT v FROM _kv WHERE k = 'meta'").fetchone()[0])
+            tables = json.loads(conn.execute("SELECT v FROM _kv WHERE k = 'tables'").fetchone()[0])
+            catalog = [(e["name"], tables[e["name"]]) for e in meta["sheets"]]
         return {
             str(name): [json.loads(r[0]) for r in conn.execute(f"SELECT d FROM {tbl} ORDER BY __row")]
             for name, tbl in catalog

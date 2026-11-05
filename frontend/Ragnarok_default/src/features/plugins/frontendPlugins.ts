@@ -49,6 +49,7 @@ function saveJson(key: string, value: unknown): boolean {
 // on EVERY config edit is what makes "change a number after picking a file"
 // crawl. Such values are kept in memory for the session but never persisted —
 // re-select the file after a reload.
+// Note: an uploaded file value is not part of the project; the user must re-pick it after opening.
 const MAX_PERSISTED_VALUE_LEN = 50_000;
 
 function isHeavyValue(v: unknown): boolean {

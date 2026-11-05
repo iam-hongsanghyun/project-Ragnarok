@@ -6,10 +6,16 @@ from typing import Any
 
 from backend.app import module_hooks as mh
 
-from . import carrier_output_cap
+from . import carrier_output_cap, period_budgets
 from .constraint_dsl import apply_constraint_specs, apply_dsl_constraints
 from .custom_constraints import apply_custom_constraints
-from .native_routing import dsl_candidates, routed_keys, route_native, spec_candidates, structured_candidates
+from .native_routing import (
+    dsl_candidates,
+    route_native,
+    routed_keys,
+    spec_candidates,
+    structured_candidates,
+)
 
 MODULE = "constraints"
 
@@ -83,3 +89,16 @@ mh.register("submit", "constraints-dsl-fallback", _dsl_fallback, module=MODULE, 
 # linopy constraint per carrier. Ordered after the custom constraints.
 mh.register("guard", "carrier-output-cap-guard", carrier_output_cap.guard, module=MODULE, order=30)
 mh.register("constraints", "carrier-output-cap", carrier_output_cap.prepare, module=MODULE, order=35)
+mh.register("guard", "period-budgets-guard", period_budgets.guard, module=MODULE, order=31)
+
+
+def _carry_whole_run_limits(ctx: mh.RunContext) -> None:
+    """Rolling horizon: the model's whole-run limits (CO2 cap, carrier energy limit, e_sum) become budgets tracked window
+    by window instead of being applied in full to every window. A build step, so the rolling check that follows sees
+    them gone and the period-budgets constraint hook finds them in ``network.meta``."""
+    if ctx.network is not None and bool(getattr(ctx.rolling, "enabled", False)):
+        period_budgets.carry_whole_run_limits(ctx.network, ctx.notes)
+
+
+mh.register("build_step", "period-budgets-rolling", _carry_whole_run_limits, module=MODULE, order=90)
+mh.register("constraints", "period-budgets", period_budgets.prepare, module=MODULE, order=36)

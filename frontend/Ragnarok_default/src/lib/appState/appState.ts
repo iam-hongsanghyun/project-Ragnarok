@@ -28,10 +28,15 @@ export type AppState = Record<string, string>;
 /** Sheet name of the app state when it travels inside a model or workbook (the server takes it out). */
 export const APP_STATE_SHEET = 'RAGNAROK_AppState';
 
-/** `model` without the app-state sheet: settings are not a sheet of the editor's model. */
+/** Sheets the server folds into the project's settings (or, README, a template's instructions): never sheets of
+ *  the editor's model, or a later resync would apply a stale copy again. */
+export const SETTINGS_SHEETS = [APP_STATE_SHEET, 'RAGNAROK_RunSettings', 'README'];
+
+/** `model` without the settings sheets: settings are not sheets of the editor's model. */
 export function withoutAppStateSheet<M extends object>(model: M): M {
-  if (!(APP_STATE_SHEET in model)) return model;
-  const { [APP_STATE_SHEET]: _dropped, ...rest } = model as Record<string, unknown>;
+  if (!SETTINGS_SHEETS.some((sheet) => sheet in model)) return model;
+  const rest = { ...(model as Record<string, unknown>) };
+  for (const sheet of SETTINGS_SHEETS) delete rest[sheet];
   return rest as M;
 }
 

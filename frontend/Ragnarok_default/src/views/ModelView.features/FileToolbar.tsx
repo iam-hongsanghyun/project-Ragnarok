@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { ViewPaneHeader } from '../../shared/components/primitives';
+import { API_BASE } from 'lib/constants';
 
 export interface FileToolbarProps {
   hasResults: boolean;
@@ -72,6 +73,15 @@ export function FileToolbar(props: FileToolbarProps) {
           <button className="tb-btn" onClick={props.onExportHdf5}>Export HDF5</button>
           <div className="view-toolbar-more-sep" />
           <button className="tb-btn" onClick={props.onOpenPypsaIo} title="Import PyPSA Excel, PyPSA CSV, MATPOWER or pandapower files; export PyPSA Excel or CSV">PyPSA I/O…</button>
+          <div className="view-toolbar-more-sep" />
+          <a
+            className="tb-btn"
+            href={`${API_BASE}/api/project-file/template?format=xlsx`}
+            download="ragnarok_template.xlsx"
+            title="A small model that runs as it is: fill in your data, run settings (RAGNAROK_RunSettings) and period limits (RAGNAROK_PeriodBudgets), then Import Project and Run"
+          >
+            Project template (.xlsx)
+          </a>
         </div>
       </details>
     </ViewPaneHeader>

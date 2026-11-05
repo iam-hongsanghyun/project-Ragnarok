@@ -5,6 +5,8 @@
  * ticked scenarios are overlaid for comparison. The library persists with the
  * project (see lib/results/carbonLibrary).
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
+import { usePersistedSet } from '../../shared/hooks/usePersistedSet';
 import React, { useRef, useState } from 'react';
 import { CarbonPriceScheduleEntry, CarbonScheduleProfile, StochasticConfig } from 'lib/types';
 import { SETTINGS_CONFIG } from 'lib/constants';
@@ -41,8 +43,8 @@ export function CarbonSection(props: CarbonSectionProps) {
   const scheduleActive = schedule.length > 0;
   const library = props.carbonLibrary;
 
-  const [overlayIds, setOverlayIds] = useState<Set<string>>(new Set());
-  const [compareMode, setCompareMode] = useState(false);
+  const [overlayIds, setOverlayIds] = usePersistedSet('ui:carbon:overlay-ids');
+  const [compareMode, setCompareMode] = usePersistedState('ui:carbon:compare-mode', false);
   // The selected/active scenario (loaded on the chart, edited, applied to the
   // run). null = scalar or an unsaved custom curve.
   const [editingId, setEditingId] = useState<string | null>(null);

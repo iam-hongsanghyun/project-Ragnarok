@@ -89,7 +89,7 @@ export function HistoryView({
   onReload,
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = usePersistedState<string[]>('ui:history:selected', []);
   // Manual drag-and-drop order, persisted by run name. Empty → fall back to the
   // default newest-first (savedAt) sort. Once the user drags a row, the whole
   // visible order is captured here and from then on the list follows it; brand
@@ -104,7 +104,7 @@ export function HistoryView({
   // PyPSA-import-ready workbook with the Result included. One workbook is built
   // per run with the same part selection.
   const [exportFor, setExportFor] = useState<string[] | null>(null);
-  const [exportParts, setExportParts] = useState({ metadata: true, model: true, result: true });
+  const [exportParts, setExportParts] = usePersistedState('ui:history:export-parts', { metadata: true, model: true, result: true });
 
   const filtered = useMemo(
     () => backendRuns.filter((meta) => matchesBackendQuery(meta, query)),

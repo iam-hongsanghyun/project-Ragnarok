@@ -91,6 +91,7 @@ function toDescriptor(manifest: BackendPluginManifest, schema: ModuleConfigSchem
 
 /** Safety net: never persist an oversized/binary value (a stray base64 blob). */
 function isHeavyValue(v: unknown): boolean {
+  // An uploaded file value is not part of the project; the user must re-pick it after opening.
   return typeof v === 'string' && (v.length > 50_000 || v.startsWith('data:'));
 }
 

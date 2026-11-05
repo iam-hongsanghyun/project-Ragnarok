@@ -37,6 +37,7 @@ export interface SessionControls {
   snapshotEnd: number;
   snapshotWeight: number;
   forceLp: boolean;
+  dryRun?: boolean;
   // Custom/global constraints ("cc rules") — live React state that isn't
   // embedded in the model, so it's carried here to survive a reload.
   constraints?: CustomConstraint[];

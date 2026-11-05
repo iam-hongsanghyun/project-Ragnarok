@@ -78,9 +78,10 @@ def test_rb5_rolling_rejects_extendable_and_budgets() -> None:
         run_pypsa(ext, {"discountRate": 0.0}, opts)
     assert e1.value.status_code == 400 and "p_nom_extendable" in e1.value.detail
 
-    with pytest.raises(HTTPException) as e2:
-        run_pypsa(_two_gen_model(cap=1000.0), {"discountRate": 0.0}, opts)
-    assert e2.value.status_code == 400 and "global constraint" in e2.value.detail
+    # A whole-run CO2 cap is no longer refused: it is tracked window by window (constraints/period_budgets.py).
+    capped = run_pypsa(_two_gen_model(cap=1000.0), {"discountRate": 0.0}, opts)
+    assert capped["rolling"]["enabled"]
+    assert any("applied per window from what is left" in n for n in capped.get("narrative", []))
 
     ok = run_pypsa(_two_gen_model(), {"discountRate": 0.0}, opts)
     assert ok["rolling"]["enabled"]

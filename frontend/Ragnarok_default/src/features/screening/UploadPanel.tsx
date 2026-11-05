@@ -11,6 +11,7 @@
  * server-side for this session (it survives reload). Reference series (model
  * load or a price) are uploaded the same way and used in the correlation step.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useState } from 'react';
 import {
   DatasetKind,
@@ -101,17 +102,17 @@ export function ValidationReportView({ report, message }: { report: ValidationRe
 export function UploadPanel({ datasets, datasetsError, datasetsLoading, activeId, activeRegionId, onSelect, onChanged, onDelete }: Props) {
   const { showToast } = useToast();
   const { confirm } = useDialog();
-  const [kind, setKind] = useState<DatasetKind>('sites');
+  const [kind, setKind] = usePersistedState<DatasetKind>('ui:screening:upload:kind', 'sites');
   const [geojsonFile, setGeojsonFile] = useState<File | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [sitesFile, setSitesFile] = useState<File | null>(null);
   const [name, setName] = useState('');
-  const [layout, setLayout] = useState<Layout>('wide');
-  const [timezone, setTimezone] = useState('UTC');
-  const [gapPolicy, setGapPolicy] = useState<GapPolicy>('interpolate');
-  const [defaultUnit, setDefaultUnit] = useState<'cf' | 'mw'>('cf');
-  const [referenceKind, setReferenceKind] = useState<'load' | 'price'>('load');
-  const [unitLabel, setUnitLabel] = useState('MW');
+  const [layout, setLayout] = usePersistedState<Layout>('ui:screening:upload:layout', 'wide');
+  const [timezone, setTimezone] = usePersistedState('ui:screening:upload:timezone', 'UTC');
+  const [gapPolicy, setGapPolicy] = usePersistedState<GapPolicy>('ui:screening:upload:gap-policy', 'interpolate');
+  const [defaultUnit, setDefaultUnit] = usePersistedState<'cf' | 'mw'>('ui:screening:upload:default-unit', 'cf');
+  const [referenceKind, setReferenceKind] = usePersistedState<'load' | 'price'>('ui:screening:upload:reference-kind', 'load');
+  const [unitLabel, setUnitLabel] = usePersistedState('ui:screening:upload:unit-label', 'MW');
   const [busy, setBusy] = useState<'validate' | 'upload' | null>(null);
   const [report, setReport] = useState<ValidationReport | undefined>(undefined);
   const [message, setMessage] = useState<string | undefined>(undefined);

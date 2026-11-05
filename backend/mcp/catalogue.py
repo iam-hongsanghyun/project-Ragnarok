@@ -163,7 +163,7 @@ AREAS: dict[str, Area] = {
                 ),
                 (
                     "make a Ragnarok project file from another tool (VOID, a script)",
-                    ("describe_project_file", "build_project_file", "import_project(confirm=true)", "check_model"),
+                    ("describe_project_file", "get_project_template", "build_project_file", "import_project(confirm=true)", "check_model"),
                 ),
                 (
                     "save the whole project, settings included",
@@ -449,8 +449,13 @@ AREAS: dict[str, Area] = {
             "run options and solver reference, stored-run housekeeping.",
             ("submit_solve", "get_queue", "describe_run_options", "submit_scenario"),
             "solve run optimise queue scenario solver options linear programming mip dispatch capacity expansion "
-            "pathway multi-period stochastic rolling horizon sclopf mga lp 실행 최적화 시나리오 솔버 확률론 다기간 롤링",
+            "pathway multi-period stochastic rolling horizon sclopf mga lp run settings window carbon price discount load shedding "
+            "period budget monthly limit 실행 최적화 시나리오 솔버 확률론 다기간 롤링 실행설정 윈도우 월별 제약",
             (
+                (
+                    "set how the project runs (window, rolling, carbon price, solver)",
+                    ("get_run_settings", "set_run_settings", "set_run_settings(confirm=true)", "submit_solve"),
+                ),
                 (
                     "solve the working model and read the cost",
                     (

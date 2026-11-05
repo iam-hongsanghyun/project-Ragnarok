@@ -47,6 +47,7 @@ from typing import Any, Iterator
 import pandas as pd
 
 from . import app_state as app_state_mod
+from . import run_settings as run_settings_mod
 from . import session_store as ss
 from . import timeseries
 
@@ -56,6 +57,9 @@ _SAFE_COL = re.compile(r"^[A-Za-z0-9_]+$")
 
 #: ``_project`` key holding the cost-basis migration report of a session (see :mod:`...pypsa.network.cost_basis`).
 MIGRATION_KV_KEY = "cost_basis_migration"
+
+#: The template's instructions sheet: read by people, never stored as a model sheet.
+TEMPLATE_README_SHEET = "README"
 
 #: Version of the ``project.db`` layout written by this module.
 FORMAT_VERSION = 2
@@ -451,6 +455,14 @@ def _build_db(
     from legacy files *without* :func:`clear` wiping those files mid-migration.
     """
     model, state = app_state_mod.split_from_model(model)
+    model, run_values = run_settings_mod.split_from_model(model)
+    model = {k: v for k, v in model.items() if k != TEMPLATE_README_SHEET}
+    if run_values:
+        # A RAGNAROK_RunSettings sheet (the template, an edited export) is applied on top of the app state.
+        state = run_settings_mod.apply(
+            state or {}, run_values, labels=run_settings_mod.snapshot_labels(model),
+            step_hours=run_settings_mod.step_hours_of(model), filename=filename or None,
+        )
     with _connect(session_id, db_path) as conn:
         # IF NOT EXISTS: a concurrent request can recreate the db file with its own
         # layout between a clear and this rebuild — a bare CREATE would then 500.
@@ -661,8 +673,16 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
     if meta is None:
         return None
     model, state = app_state_mod.split_from_model(model)
+    model, run_values = run_settings_mod.split_from_model(model)
+    model = {k: v for k, v in model.items() if k != TEMPLATE_README_SHEET}
     if state is not None:
         set_app_state(session_id, state)
+    if run_values:
+        static = load_full_model(session_id, static_only=True) or {}
+        set_app_state(session_id, run_settings_mod.apply(
+            get_app_state(session_id) or {}, run_values, labels=run_settings_mod.snapshot_labels({**static, **model}),
+            step_hours=run_settings_mod.step_hours_of({**static, **model}), filename=str(meta.get("filename") or "") or None,
+        ))
     with _connect(session_id) as conn:
         tables = _tables(conn)
         existing = {s["name"]: s for s in meta.get("sheets", []) if isinstance(s, dict)}

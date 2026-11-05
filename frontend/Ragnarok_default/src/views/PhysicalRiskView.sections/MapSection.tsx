@@ -10,7 +10,8 @@
  * scaled/colored by each asset's total EAI (summed across perils, or a single
  * peril via the filter dropdown below); otherwise markers are uniform.
  */
-import React, { useMemo, useState } from 'react';
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
+import React, { useMemo } from 'react';
 import { AssetRiskMap } from '../../features/physicalRisk/AssetRiskMap';
 import { PhysicalRiskSectionProps } from 'lib/physicalRisk/types';
 import { totalEaiByAsset } from 'lib/physicalRisk/mapAdaptation';
@@ -25,7 +26,7 @@ export function MapSection({ portfolio, run }: PhysicalRiskSectionProps) {
   const hasResult = perils.length > 0;
   const currency = run?.result?.currency || portfolio?.assets[0]?.currency || 'USD';
 
-  const [perilFilter, setPerilFilter] = useState<string>('');
+  const [perilFilter, setPerilFilter] = usePersistedState<string>('ui:physical-risk:map:peril-filter', '');
 
   const eaiByAsset = useMemo(() => (hasResult ? totalEaiByAsset(perils) : null), [hasResult, perils]);
 

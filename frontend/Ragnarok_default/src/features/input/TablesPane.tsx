@@ -1,3 +1,4 @@
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { GridRow, Primitive, SheetName, TableSel, TsSheetName, WorkbookModel } from 'lib/types';
@@ -552,17 +553,17 @@ export function TablesPane({
 
   // ── Bulk series transform (T1): scale / shift / interpolate / clip ──────────
   const [txOpen, setTxOpen] = useState(false);
-  const [txOp, setTxOp] = useState<SeriesTransformOp>('scale');
-  const [txFactor, setTxFactor] = useState(1);
-  const [txDelta, setTxDelta] = useState(0);
-  const [txShift, setTxShift] = useState(1);
-  const [txWrap, setTxWrap] = useState(true);
-  const [txMin, setTxMin] = useState('');
-  const [txMax, setTxMax] = useState('');
-  const [txGrowth, setTxGrowth] = useState(10);
-  const [txColumns, setTxColumns] = useState<string[]>([]);
+  const [txOp, setTxOp] = usePersistedState<SeriesTransformOp>('ui:tables:series-transform:tx-op', 'scale');
+  const [txFactor, setTxFactor] = usePersistedState('ui:tables:series-transform:tx-factor', 1);
+  const [txDelta, setTxDelta] = usePersistedState('ui:tables:series-transform:tx-delta', 0);
+  const [txShift, setTxShift] = usePersistedState('ui:tables:series-transform:tx-shift', 1);
+  const [txWrap, setTxWrap] = usePersistedState('ui:tables:series-transform:tx-wrap', true);
+  const [txMin, setTxMin] = usePersistedState('ui:tables:series-transform:tx-min', '');
+  const [txMax, setTxMax] = usePersistedState('ui:tables:series-transform:tx-max', '');
+  const [txGrowth, setTxGrowth] = usePersistedState('ui:tables:series-transform:tx-growth', 10);
+  const [txColumns, setTxColumns] = usePersistedState<string[]>('ui:tables:series-transform:tx-columns', []);
   const [txBusy, setTxBusy] = useState(false);
-  useEffect(() => { setTxOpen(false); setTxColumns([]); }, [sel.sheet]);
+  useEffect(() => { setTxOpen(false); setTxColumns([]); }, [sel.sheet, setTxColumns]);
   const applyTransform = async () => {
     setTxBusy(true);
     try {

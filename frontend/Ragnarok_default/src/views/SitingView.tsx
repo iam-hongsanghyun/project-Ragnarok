@@ -19,6 +19,7 @@
  * its own (the Screening tab, `modules/screening/`); this tab is only the
  * expansion-based flow.
  */
+import { usePersistedState } from '../shared/hooks/usePersistedState';
 import React, { useEffect, useMemo, useState } from 'react';
 import { LatLngBoundsExpression } from 'leaflet';
 import { ViewPaneHeader } from '../shared/components/primitives';
@@ -97,18 +98,18 @@ function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, curren
   const { showToast } = useToast();
 
   // ── Scan configuration ────────────────────────────────────────────────
-  const [bbox, setBbox] = useState<Bbox | null>(null);
-  const [solarOn, setSolarOn] = useState(true);
-  const [windOn, setWindOn] = useState(true);
-  const [gridPoints, setGridPoints] = useState(25);
-  const [dateFrom, setDateFrom] = useState('2019-01-01');
-  const [dateTo, setDateTo] = useState('2019-01-31');
-  const [utcOffset, setUtcOffset] = useState(0);
-  const [weatherSource, setWeatherSource] = useState('open-meteo');
-  const [siteCapacityMw, setSiteCapacityMw] = useState(400);
-  const [solarCapex, setSolarCapex] = useState(35000);
-  const [windCapex, setWindCapex] = useState(60000);
-  const [connCostPerMwKm, setConnCostPerMwKm] = useState(150);
+  const [bbox, setBbox] = usePersistedState<Bbox | null>('ui:siting:bbox', null);
+  const [solarOn, setSolarOn] = usePersistedState('ui:siting:solar-on', true);
+  const [windOn, setWindOn] = usePersistedState('ui:siting:wind-on', true);
+  const [gridPoints, setGridPoints] = usePersistedState('ui:siting:grid-points', 25);
+  const [dateFrom, setDateFrom] = usePersistedState('ui:siting:date-from', '2019-01-01');
+  const [dateTo, setDateTo] = usePersistedState('ui:siting:date-to', '2019-01-31');
+  const [utcOffset, setUtcOffset] = usePersistedState('ui:siting:utc-offset', 0);
+  const [weatherSource, setWeatherSource] = usePersistedState('ui:siting:weather-source', 'open-meteo');
+  const [siteCapacityMw, setSiteCapacityMw] = usePersistedState('ui:siting:capacity-mw', 400);
+  const [solarCapex, setSolarCapex] = usePersistedState('ui:siting:solar-capex', 35000);
+  const [windCapex, setWindCapex] = usePersistedState('ui:siting:wind-capex', 60000);
+  const [connCostPerMwKm, setConnCostPerMwKm] = usePersistedState('ui:siting:conn-cost-per-mw-km', 150);
 
   // ── Scan result ───────────────────────────────────────────────────────
   const [scanning, setScanning] = useState(false);
@@ -131,7 +132,7 @@ function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, curren
     setCandidates(null);
     setFragment(null);
     setApplied(false);
-  }, [handoff]);
+  }, [handoff, setBbox, setSolarOn, setWindOn]);
 
   // Candidates already merged into the workbook (an earlier apply, possibly a
   // previous session) — lets the results table work without a fresh scan.

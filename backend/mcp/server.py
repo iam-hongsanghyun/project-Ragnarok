@@ -1839,6 +1839,38 @@ async def export_project_file(dest: str | None = None) -> Any:
 
 
 @mcp.tool(
+    annotations=_EXPORT_ANN,
+    description="Write the Ragnarok project TEMPLATE to disk: a small model that runs as it is (two regions, 6-hourly, Jan-Feb 2030, monthly rolling windows) with every sheet a person or agent fills in - the model sheets, RAGNAROK_RunSettings (window, carbon price, discount rate, load shedding, rolling horizon, solver, currency, modules) and RAGNAROK_PeriodBudgets (monthly / yearly energy or CO2 limits). format = xlsx (fill in Excel) or db (a project file). Replace the data and settings, then import_project and submit_solve: it runs with the settings the file states.",
+)
+async def get_project_template(dest: str | None = None, format: str = "xlsx") -> Any:  # noqa: A002
+    fmt = format.lower().strip()
+    if fmt not in ("xlsx", "db"):
+        return {"error": "format must be xlsx or db."}
+    data, suggested = await get_client().project_template(fmt)
+    out = _resolve_out(dest, suggested or f"ragnarok_template.{fmt}")
+    out.write_bytes(data)
+    return {"status": "written", "path": str(out), "bytes": len(data), "format": fmt}
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Read the working project's run settings as one table: setting, value (null = app default), unit, default, choices, meaning. Settings: windowStart/windowEnd (snapshot labels), carbonPrice, discountRate, loadShedding, loadSheddingCost, forceLp, dryRun, rolling, rollingWindowHours, rollingOverlapHours, rollingTerminalSoc, solverType, solverThreads, solveAcceptance, objectiveAutoScale, currencyCode, currencySymbol, enabledModules, dateFormat. These are what a run uses when submit_solve states no options.",
+)
+async def get_run_settings() -> Any:
+    return await get_client().get_run_settings()
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Set run settings of the working project: values = {setting: value} (names and units from get_run_settings; null leaves one as it is). Validated (a bad value is refused naming the valid input), saved in the project and applied in open GUIs. Example: {rolling: true, rollingWindowHours: 744, rollingOverlapHours: 24, carbonPrice: 30}. Re-call with confirm=true to apply.",
+)
+async def set_run_settings(values: dict[str, Any], confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Set {len(values)} run setting(s) of the working project.", {"values": values})
+    return await get_client().set_run_settings(values)
+
+
+@mcp.tool(
     annotations=_RO,
     description="Read every app setting the working project holds (its app state): {key: value} with values as the browser stores them (JSON strings). Keys include 'ragnarok:settings' (Settings, incl. enabledModules), 'ragnarok:session:controls' (run controls: window, carbon price, constraints, the live scenario), 'ragnarok:fe-plugins:configs' and 'ui:be-plugin-cfg:<plugin>' (plugin settings) and each module's own keys. null when no project is loaded.",
 )
@@ -2605,6 +2637,9 @@ declare_areas({
     "export_project_file": "files",
     "get_app_state": "session",
     "set_app_state": "session",
+    "get_project_template": "files",
+    "get_run_settings": "run",
+    "set_run_settings": "run",
     "export_workbook": "files",
     "import_result": "files",
     "get_server_info": "session",

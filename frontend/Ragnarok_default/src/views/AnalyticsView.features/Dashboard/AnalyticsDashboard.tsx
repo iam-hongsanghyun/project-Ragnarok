@@ -486,7 +486,7 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">No asset economics available for this run.</p>;
         case 'statistics':
           return results.statistics
-            ? <StatisticsCard data={results.statistics} runName={runName ?? null} />
+            ? <StatisticsCard data={results.statistics} runName={runName ?? null} instanceId={card.id} />
             : <p className="dashboard-cell-missing">No statistics available for this run.</p>;
         case 'near-optimal':
           return results.nearOptimal
@@ -510,11 +510,11 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
         case 'company-comparison':
           return (results.companies || results.companyFinance || results.companyStatement)
-            ? <CompanyComparisonCard runName={runName} period={selectedPeriod} />
+            ? <CompanyComparisonCard runName={runName} period={selectedPeriod} instanceId={card.id} />
             : <p className="dashboard-cell-missing">No owner-tagged companies to compare.</p>;
         case 'transition-risk':
           return results.companyStatement
-            ? <TransitionRiskCard data={results.companyStatement} runName={runName} period={selectedPeriod} />
+            ? <TransitionRiskCard data={results.companyStatement} runName={runName} period={selectedPeriod} instanceId={card.id} />
             : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
         case 'adequacy':
           return results.adequacy
@@ -542,7 +542,7 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">No maintainable units in this run (set <code>maintainable</code> on a generator, link or process).</p>;
         case 'phase-shifters':
           return results.phaseShifters
-            ? <PhaseShiftersCard data={results.phaseShifters} />
+            ? <PhaseShiftersCard data={results.phaseShifters} instanceId={card.id} />
             : <p className="dashboard-cell-missing">No optimised phase shifters in this run (set <code>phase_shift_min</code> &lt; <code>phase_shift_max</code> on a transformer).</p>;
         case 'setpoint-duals':
           return <SetpointDualsCard results={results} runName={runName} period={selectedPeriod} currencySymbol={currencySymbol} />;
@@ -636,7 +636,7 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">LMP decomposition was not enabled for this run.</p>;
         case 'emissions-breakdown':
           return results.emissionsBreakdown
-            ? <EmissionsBreakdownCard data={results.emissionsBreakdown} totals={totals.data?.emissions ?? null} />
+            ? <EmissionsBreakdownCard data={results.emissionsBreakdown} totals={totals.data?.emissions ?? null} instanceId={card.id} />
             : <p className="dashboard-cell-missing">No emissions breakdown available.</p>;
         case 'capacity-expansion':
           return results.expansionResults && results.expansionResults.length > 0
@@ -644,7 +644,7 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">No capacity expansion in this run.</p>;
         case 'capacity-by-period':
           return results.pathway?.enabled
-            ? <CapacityByPeriodCard model={model} results={results} />
+            ? <CapacityByPeriodCard model={model} results={results} instanceId={card.id} />
             : <p className="dashboard-cell-missing">Pathway not enabled.</p>;
         case 'pathway-overview':
           return results.pathway?.enabled

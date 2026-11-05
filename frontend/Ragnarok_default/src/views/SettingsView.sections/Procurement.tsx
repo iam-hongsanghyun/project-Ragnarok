@@ -11,6 +11,7 @@
  * Distinct from the Settings sections around it: it does not gate the next
  * solve — it calls the procurement optimizer directly and shows the answer now.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React from 'react';
 import { ValuePoint } from 'lib/types';
 import {
@@ -61,12 +62,14 @@ export function ProcurementSection(props: ProcurementSectionProps) {
   );
   const haveRun = runPrices.length >= 2;
 
-  const [source, setSource] = React.useState<'run' | 'reference'>(haveRun ? 'run' : 'reference');
-  const [refMean, setRefMean] = React.useState(60);
-  const [refVol, setRefVol] = React.useState(40);
-  const [loadMw, setLoadMw] = React.useState(100);
-  const [growthPct, setGrowthPct] = React.useState(0);
-  const [loadShaped, setLoadShaped] = React.useState(false);
+  const [storedSource, setSource] = usePersistedState<'run' | 'reference'>('ui:procurement:source', haveRun ? 'run' : 'reference');
+  // A saved 'run' source falls back to the reference series when no run is loaded.
+  const source: 'run' | 'reference' = storedSource === 'run' && !haveRun ? 'reference' : storedSource;
+  const [refMean, setRefMean] = usePersistedState('ui:procurement:ref-mean', 60);
+  const [refVol, setRefVol] = usePersistedState('ui:procurement:ref-vol', 40);
+  const [loadMw, setLoadMw] = usePersistedState('ui:procurement:load-mw', 100);
+  const [growthPct, setGrowthPct] = usePersistedState('ui:procurement:growth-pct', 0);
+  const [loadShaped, setLoadShaped] = usePersistedState('ui:procurement:load-shaped', false);
 
   // Normalised run load shape (mean 1), aligned to the price series length.
   const loadShape = React.useMemo(() => {
@@ -77,14 +80,14 @@ export function ProcurementSection(props: ProcurementSectionProps) {
   }, [props.loadShape]);
   const canShape = source === 'run' && !!loadShape;
 
-  const [inst, setInst] = React.useState<InstrumentState>({
+  const [inst, setInst] = usePersistedState<InstrumentState>('ui:procurement:inst', {
     ppa: { enabled: true, strike: 60, maxMw: 100 },
     forward: { enabled: false, price: 62, maxMw: 100 },
     retail: { enabled: false, price: 68 },
   });
-  const [alpha, setAlpha] = React.useState(0.95);
-  const [budgetFrac, setBudgetFrac] = React.useState(1); // 0 = min risk, 1 = min cost
-  const [stress2x, setStress2x] = React.useState(true);
+  const [alpha, setAlpha] = usePersistedState('ui:procurement:alpha', 0.95);
+  const [budgetFrac, setBudgetFrac] = usePersistedState('ui:procurement:budget-frac', 1); // 0 = min risk, 1 = min cost
+  const [stress2x, setStress2x] = usePersistedState('ui:procurement:stress2x', true);
 
   const [result, setResult] = React.useState<ProcurementResult | null>(null);
   const [busy, setBusy] = React.useState(false);

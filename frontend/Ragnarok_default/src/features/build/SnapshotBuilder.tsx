@@ -10,6 +10,7 @@
  * axis silently misaligns every profile indexed against it — so the confirm
  * step names the row count being discarded.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React, { useMemo, useState } from 'react';
 import {
   HORIZONS,
@@ -36,11 +37,11 @@ const DEFAULT_START = '2030-01-01 00:00';
 
 export function SnapshotBuilder({ existingCount, onGenerate, onSetWeightingsFromSpacing }: Props) {
   const { confirm } = useDialog();
-  const [start, setStart] = useState(DEFAULT_START);
-  const [resolutionId, setResolutionId] = useState('1h');
-  const [horizonId, setHorizonId] = useState('1d');
-  const [customCount, setCustomCount] = useState('24');
-  const [syncWeight, setSyncWeight] = useState(true);
+  const [start, setStart] = usePersistedState('ui:snapshot-builder:start', DEFAULT_START);
+  const [resolutionId, setResolutionId] = usePersistedState('ui:snapshot-builder:resolution', '1h');
+  const [horizonId, setHorizonId] = usePersistedState('ui:snapshot-builder:horizon', '1d');
+  const [customCount, setCustomCount] = usePersistedState('ui:snapshot-builder:custom-count', '24');
+  const [syncWeight, setSyncWeight] = usePersistedState('ui:snapshot-builder:sync-weight', true);
   const [busy, setBusy] = useState(false);
 
   const resolution = RESOLUTIONS.find((r) => r.id === resolutionId) ?? RESOLUTIONS[2];

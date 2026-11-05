@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BackendRunMeta } from 'lib/types';
 import { ComparisonResponse, fetchRunComparison } from 'lib/api/resultsDerived';
 import { useAsync } from '../../shared/hooks/useAsync';
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import { ComparisonMatrix, ComparisonScenario, ComparisonStatus } from './ComparisonMatrix';
 
 // How many scenarios can sit side by side. The matrix fills the width with this
@@ -101,15 +102,17 @@ function ScenarioPicker({ available, selected, max, onAdd, onRemove }: {
 export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$' }: Props) {
   // Column order = chosen run names. The matrix data is one server request
   // (`GET /api/results/compare`) for the selected runs and the shown topics.
-  const [selected, setSelected] = useState<string[]>(() => (activeRunName ? [activeRunName] : []));
-  const [enabled, setEnabled] = useState<string[]>(DEFAULT_TOPICS);
+  const [selected, setSelected] = usePersistedState<string[]>('ui:comparison:selected-runs', activeRunName ? [activeRunName] : []);
+  const [enabled, setEnabled] = usePersistedState<string[]>('ui:comparison:enabled-topics', DEFAULT_TOPICS);
 
   useEffect(() => {
+    // The run list is empty until the first listing lands; a restored selection must survive that.
+    if (backendRuns.length === 0) return;
     setSelected((prev) => {
       const next = prev.filter((n) => backendRuns.some((r) => r.name === n));
       return next.length === prev.length ? prev : next;
     });
-  }, [backendRuns]);
+  }, [backendRuns, setSelected]);
 
   const metaByName = useMemo(() => new Map(backendRuns.map((r) => [r.name, r])), [backendRuns]);
 

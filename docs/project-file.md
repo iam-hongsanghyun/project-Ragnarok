@@ -93,6 +93,8 @@ PyPSA's default.
 | `RAGNAROK_CarrierOutputCap` | Per-snapshot output cap by carrier |
 | `RAGNAROK_AnnualBudgets` | Annual budgets |
 | `RAGNAROK_TimeUnits` | Time units of time-based columns |
+| `RAGNAROK_PeriodBudgets` | Energy or CO2 limits over a month, a year or any range (§8) |
+| `RAGNAROK_RunSettings` | How the run is solved, as `setting` / `value` rows (§8). Read on open and folded into `_app_state`; never stored as a sheet |
 
 The column contract of each module sheet lives with its module: see
 [module.md](./module.md), or the MCP tools (`describe_run_options`,
@@ -116,8 +118,15 @@ takes the current ones. Code: `frontend/…/src/lib/appState/appState.ts`.
 | `project_ragnarok_settings` | Settings: solver, currency, discount rate, load shedding, `enabledModules`, … |
 | `ragnarok:session:controls` | Live run controls: window, carbon price and schedule, constraints, pathway, rolling, sampling, and the full live scenario |
 | `ragnarok:fe-plugins:configs`, `ui:be-plugin-cfg:<plugin>`, `ui:be-plugin-runs:<plugin>` | Plugin settings |
-| `ragnarok:data-import:*`, `ragnarok:pypsa-earth:*`, `ragnarok.screening.*`, `ragnarok.siting.*`, `ui:forge-*`, `ui:physical-risk-session-id`, `ragnarok:dashboard:*` | Module options |
-| `ui:*`, `pypsa.*` | View state: tabs, panel sizes, column widths, hidden columns |
+| `ragnarok:p2x:rfnbo` | RFNBO matching settings (P2X) |
+| `ragnarok:data-import:*`, `ragnarok:pypsa-earth:*`, `ragnarok.screening.*`, `ui:screening:*`, `ui:siting:*`, `ui:forge:*`, `ui:forge-*`, `ui:procurement:*`, `ui:carbon:*`, `ui:composites:*`, `ui:physical-risk:*`, `ui:snapshot-builder:*`, `ui:pypsa-earth:*`, `ui:network-analysis:*`, `ui:input-analyser:*`, `ui:tables:*` | Each module's and tool's inputs |
+| `ragnarok:dashboard:*`, `ui:card:*`, `ui:comparison:*`, `ui:reporting:*`, `ui:history:*`, `ui:scenario-diff:*` | Analytics layouts, chart choices, compared runs, reports |
+| `ui:app:*` (`tab`, `active-run-name`, `chart-sections`, `dry-run`), other `ui:*`, `pypsa.*` | Where the screen was: open tab, shown run, panel sizes, column widths, hidden columns, map layers |
+
+Not carried (by design): API keys (`ragnarok:secret:*`) - a security boundary; caches and build markers; installed plugin
+packages and their uploaded files (per machine: a config keeps the file name, the user re-picks the file); training and
+tour progress (per learner). Data the server keeps per installation - uploaded Screening datasets, physical-risk
+portfolios, the PyPSA-Earth folder, the run History - stays on that machine; the project keeps the reference (its id).
 
 Outside `project.db` the same pairs travel as a `RAGNAROK_AppState` sheet
 (`key`, `part`, `value`; a value longer than one Excel cell is split across
@@ -158,7 +167,10 @@ Assemble the model as `{sheet: rows}` (§3), optionally with settings
 | Write a `.db` from a model, without touching the working project | `build_project_file(model, dest, app_state)` |
 | Open a `.db` as the working project | `import_project(path)` |
 | Save the working project as a `.db` | `export_project_file(dest)` |
-| Read or change the project's settings | `get_app_state`, `set_app_state` |
+| Start from a runnable example | `get_project_template(dest, format)` (§9) |
+| Read or change how it runs | `get_run_settings`, `set_run_settings` (§8) |
+| Read or change any other setting | `get_app_state`, `set_app_state` (every key of §5) |
+| Run it with its own settings | `submit_solve` with no options |
 
 **Over HTTP:**
 
@@ -169,6 +181,8 @@ Assemble the model as `{sheet: rows}` (§3), optionally with settings
 | `GET /api/project-file?session_id=…` | Downloads the session's project |
 | `GET` / `PUT /api/session/app-state` | Reads / writes the settings |
 | `GET /api/project-file/guide` | This document |
+| `GET /api/project-file/template?format=xlsx\|db` | The template (§9) |
+| `GET` / `PUT /api/session/run-settings` | Reads / writes the run settings (§8) |
 
 **In Python** (from the repo root, `.venv-pypsa/bin/python`):
 
@@ -199,3 +213,53 @@ sqlite_store.build_file(
 **Opening it in the app:** Model → **Import Project** takes the `.db`; **Save
 Project File** writes one. A folder `backend/data/examples/<id>/` holding a
 `project.db` with an `example` key in `_project` appears in the examples list.
+
+## 8. Run settings and period limits
+
+**`RAGNAROK_RunSettings`**: one row per setting (`setting`, `value`; `unit` and `description` are for people and
+ignored on read). A blank value keeps the app default. Opening a file applies the sheet on top of the project's
+settings; an exported workbook writes it back, so an edited workbook round-trips. The same table is
+`GET`/`PUT /api/session/run-settings` and the MCP tools `get_run_settings` / `set_run_settings`.
+
+| Setting | Unit | Meaning |
+|---|---|---|
+| `windowStart`, `windowEnd` | snapshot label | The snapshots the run solves (inclusive); blank = all |
+| `carbonPrice` | currency/tCO2 | Carbon price |
+| `discountRate` | fraction | Annualises overnight cost |
+| `loadShedding`, `loadSheddingCost` | true/false, currency/MWh | Unserved load and its value |
+| `forceLp`, `dryRun` | true/false | LP relaxation of unit commitment; build and check without solving |
+| `rolling`, `rollingWindowHours`, `rollingOverlapHours`, `rollingTerminalSoc` | true/false, h, h, true/false | Rolling horizon |
+| `solverType`, `solverThreads`, `solveAcceptance`, `objectiveAutoScale` | auto/simplex/ipm/pdlp/hipo, threads, lenient/strict, true/false | Solver |
+| `currencyCode`, `currencySymbol`, `enabledModules`, `dateFormat` | text | Currency, module tabs shown, how dates are read |
+
+The time resolution is the model's: the `snapshots` sheet's `objective` / `generators` / `stores` columns give the
+hours each snapshot stands for (6 for 6-hourly); rolling hours are converted with it.
+
+A run submitted without options (an agent's `submit_solve`, a script) takes the project's own settings key by key;
+what the submitter states wins.
+
+**`RAGNAROK_PeriodBudgets`**: one row per limit.
+
+| Column | Meaning |
+|---|---|
+| `name` | Label (optional) |
+| `measure` | `energy` (MWh of generator output, default) or `emissions` (tCO2: carrier `co2_emissions` / efficiency) |
+| `carrier` / `generator` | Carrier(s) or generator name(s), comma separated; blank `carrier` = every generator (emissions only) |
+| `period` | `YYYY-MM` (a month) or `YYYY` (a year); or leave blank and use `start` (inclusive) / `end` (exclusive) |
+| `sense` | `<=` (default), `>=`, `==` |
+| `value` | The period total |
+
+A single solve keeps each limit exactly. A rolling run gives each window what is left of the limit for the period
+hours it sees, so the run never overspends and monthly windows reproduce the single solve. Under rolling the
+model's own whole-run limits (a CO2 `GlobalConstraint`, a carrier `operational_limit`, a generator's
+`e_sum_max` / `e_sum_min`) are tracked the same way instead of being applied in full to every window
+([backend.md](./backend.md), *Period budgets*).
+
+## 9. The template
+
+`GET /api/project-file/template?format=xlsx` (Model → More formats… → **Project template**, or MCP
+`get_project_template`) is a small model that runs as it is: two regions, 6-hourly over January-February 2030,
+gas, solar and a hydro plant with monthly limits, solved in monthly rolling windows. It has every sheet a person
+fills in - the model sheets, `RAGNAROK_RunSettings`, `RAGNAROK_PeriodBudgets` - and a `README` sheet. Replace the
+data and settings, then **Import Project** and **Run**: the run uses exactly what the file states. `format=db` gives
+the same project as a project file.

@@ -174,21 +174,14 @@ def apply_to_network(
     if not rows:
         return []
     table = compute_table(network, rows)
+    for t in table:
+        _frame(network, t["component"]).loc[t["name"], t["attribute"]] = t["value"]
     if rolling:
-        # PyPSA's rolling-horizon helper applies e_sum and GlobalConstraint constants to EACH window, so a horizon
-        # total written into the column would be spent in full by every window. The module splits it instead.
-        gc_rows = [t for t in table if t["component"] == "global_constraints"]
-        if gc_rows:
-            raise ValueError(
-                "Annual budgets on a GlobalConstraint (" + ", ".join(t["name"] for t in gc_rows) + ") cannot be combined with "
-                "rolling horizon: PyPSA applies the constant to every window, not to the horizon. Turn rolling horizon off, "
-                "or use an e_sum budget on a generator (split per window by committed hours)."
-            )
+        # PyPSA's rolling-horizon helper would apply e_sum and GlobalConstraint constants to EACH window. The run
+        # turns them into period budgets tracked window by window (constraints/period_budgets.py) before solving.
         for t in table:
-            t["scope"] += "; split per rolling window by committed hours (declared constraint, e_sum column left unbounded)"
-    else:
-        for t in table:
-            _frame(network, t["component"]).loc[t["name"], t["attribute"]] = t["value"]
+            t["scope"] += "; tracked per rolling window from what is left of the budget"
+            t["tracked"] = True
     network.meta[META_KEY] = table
     w = _weights(network)
     notes.append(
@@ -269,7 +262,7 @@ def extra_functionality(n: pypsa.Network, snapshots: Any = None) -> None:
 
     wda = xr.DataArray(w.to_numpy(), coords={"snapshot": idx}, dims=("snapshot",))
     for t in table:
-        if t["component"] != "generators" or t["name"] not in set(p.indexes["name"]):
+        if t.get("tracked") or t["component"] != "generators" or t["name"] not in set(p.indexes["name"]):
             continue
         energy = (p.sel(name=t["name"]) * wda).sum("snapshot")
         rhs = t["value"] * fraction

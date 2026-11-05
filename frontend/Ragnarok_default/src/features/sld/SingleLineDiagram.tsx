@@ -179,9 +179,9 @@ function tooltipIndex(layout: SldLayout): Map<string, string[]> {
 
 export function SingleLineDiagram({ model, onSelect }: SingleLineDiagramProps) {
   const [showNonElectric, setShowNonElectric] = usePersistedState<boolean>('ui:sld-non-electric', false);
-  const [voltage, setVoltage] = useState<number | null>(null);
-  const [area, setArea] = useState<string | null>(null);
-  const [drawLarge, setDrawLarge] = useState(false);
+  const [voltage, setVoltage] = usePersistedState<number | null>('ui:sld:voltage', null);
+  const [area, setArea] = usePersistedState<string | null>('ui:sld:area', null);
+  const [drawLarge, setDrawLarge] = usePersistedState('ui:sld:draw-large', false);
   const options: SldOptions = useMemo(() => ({ showNonElectric, voltageFilter: voltage, areaFilter: area, drawLarge }), [showNonElectric, voltage, area, drawLarge]);
   const layout = useMemo(() => buildSldLayout(model, options), [model, options]);
   const tips = useMemo(() => tooltipIndex(layout), [layout]);

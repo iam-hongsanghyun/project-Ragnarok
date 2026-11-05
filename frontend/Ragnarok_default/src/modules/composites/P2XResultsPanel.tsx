@@ -3,6 +3,7 @@
  * dispatch against the designated RES, H2 store state of charge, and the RFNBO compliance table. Every number is
  * computed by the backend (`/api/p2x/results/{run}`); this component only draws it.
  */
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import React from 'react';
 import type { CheckRow, P2XResults } from 'lib/api/p2x';
 import { fetchP2XResults } from 'lib/api/p2x';
@@ -48,28 +49,28 @@ interface Props {
 
 export function P2XResultsPanel({ runs: runsProp, run: runProp }: Props) {
   const [ownRuns, setRuns] = React.useState<ReportRunOption[]>([]);
-  const [ownRun, setRun] = React.useState('');
+  const [ownRun, setRun] = usePersistedState('ui:composites:p2x:run', '');
   const runs = runsProp ?? ownRuns;
   const run = runProp ?? ownRun;
-  const [period, setPeriod] = React.useState('');
+  const [period, setPeriod] = usePersistedState('ui:composites:p2x:period', '');
   const pathway = React.useMemo(() => pathwayPeriodsOf(runs.find((r) => r.name === run)), [runs, run]);
   // a period only means something for a pathway run: drop a stale pick when the run changes to a single-period one
   React.useEffect(() => {
     if (!pathway.isPathway || (period !== '' && !pathway.periods.includes(Number(period)))) setPeriod('');
-  }, [pathway, period]);
-  const [mode, setMode] = React.useState<'nodal' | 'ppa'>('nodal');
-  const [chain, setChain] = React.useState('');
-  const [product, setProduct] = React.useState('H2');
+  }, [pathway, period, setPeriod]);
+  const [mode, setMode] = usePersistedState<'nodal' | 'ppa'>('ui:composites:p2x:mode', 'nodal');
+  const [chain, setChain] = usePersistedState('ui:composites:p2x:chain', '');
+  const [product, setProduct] = usePersistedState('ui:composites:p2x:product', 'H2');
   const [data, setData] = React.useState<P2XResults | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [fitAxis, setFitAxis] = React.useState(true);
+  const [fitAxis, setFitAxis] = usePersistedState('ui:composites:p2x:fit-axis', true);
 
   React.useEffect(() => {
     if (runsProp) return undefined;
     let live = true;
     fetchReportRuns()
-      .then((list) => { if (live) { setRuns(list); setRun((cur) => cur || list[0]?.name || ''); } })
+      .then((list) => { if (live) { setRuns(list); setRun((cur) => (cur && list.some((r) => r.name === cur) ? cur : list[0]?.name || '')); } })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,7 +86,7 @@ export function P2XResultsPanel({ runs: runsProp, run: runProp }: Props) {
       .catch((e) => { if (live) { setData(null); setError(e instanceof Error ? e.message : String(e)); } })
       .finally(() => { if (live) setBusy(false); });
     return () => { live = false; };
-  }, [run, period, mode, chain]);
+  }, [run, period, mode, chain, setProduct]);
 
   const theme = React.useMemo(() => readChartTheme(), []);
   const waterfall = React.useMemo(() => {

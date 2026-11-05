@@ -11,6 +11,7 @@
  * and shows that table instead; "Back to default" restores the solve-time table.
  */
 import React, { useState } from 'react';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { StatisticsQueryResponse, StatisticsResult } from 'lib/types';
 import { postStatisticsQuery, splitList } from 'lib/api/statistics';
 import { carrierColor } from 'lib/utils/helpers';
@@ -27,6 +28,8 @@ interface Props {
   data: StatisticsResult;
   /** Stored-run name; the parameter panel is disabled without it. */
   runName?: string | null;
+  /** Card id; scopes the saved query choices to this card. */
+  instanceId?: string;
 }
 
 /** `n.statistics` method names (mirror of backend STATISTIC_METRICS; an unknown one answers 400 with the list). */
@@ -37,14 +40,15 @@ const METRICS = [
   'system_cost', 'revenue', 'market_value', 'prices', 'transmission',
 ];
 
-function QueryPanel({ runName, onResult }: { runName: string | null; onResult: (r: StatisticsQueryResponse | null) => void }) {
-  const [metric, setMetric] = useState('energy_balance');
-  const [groupby, setGroupby] = useState('');
-  const [busCarrier, setBusCarrier] = useState('');
-  const [aggregate, setAggregate] = useState<'sum' | 'mean' | 'none'>('sum');
-  const [atPort, setAtPort] = useState(false);
-  const [components, setComponents] = useState('');
-  const [carrier, setCarrier] = useState('');
+function QueryPanel({ runName, instanceId, onResult }: { runName: string | null; instanceId: string; onResult: (r: StatisticsQueryResponse | null) => void }) {
+  const k = `ui:card:statistics:${instanceId}:`;
+  const [metric, setMetric] = usePersistedState(`${k}metric`, 'energy_balance');
+  const [groupby, setGroupby] = usePersistedState(`${k}groupby`, '');
+  const [busCarrier, setBusCarrier] = usePersistedState(`${k}bus-carrier`, '');
+  const [aggregate, setAggregate] = usePersistedState<'sum' | 'mean' | 'none'>(`${k}aggregate`, 'sum');
+  const [atPort, setAtPort] = usePersistedState(`${k}at-port`, false);
+  const [components, setComponents] = usePersistedState(`${k}components`, '');
+  const [carrier, setCarrier] = usePersistedState(`${k}carrier`, '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -139,14 +143,14 @@ function QueryTable({ q }: { q: StatisticsQueryResponse }) {
   );
 }
 
-export function StatisticsCard({ data, runName = null }: Props) {
+export function StatisticsCard({ data, runName = null, instanceId = 'default' }: Props) {
   const [query, setQuery] = useState<StatisticsQueryResponse | null>(null);
   if (!data.rows.length || !data.columns.length) {
     return <p className="dashboard-cell-missing">No statistics for this run.</p>;
   }
   return (
     <div className="econ-card">
-      <QueryPanel runName={runName} onResult={setQuery} />
+      <QueryPanel runName={runName} instanceId={instanceId} onResult={setQuery} />
       {query && (
         <div className="econ-body">
           <div className="econ-table-col">

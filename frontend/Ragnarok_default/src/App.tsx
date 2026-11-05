@@ -358,10 +358,13 @@ function AppInner() {
     setModel(next);
     requestStaticResync();
   }, [model, requestStaticResync]);
-  // Opens on the Welcome / intro screen — the workspace tab is NOT persisted
-  // across reloads (was restoring the last view, e.g. Comparison) — unless the
-  // URL carries `?view=<tab id>` (host embedding), see initialTabFromUrl.
-  const [tab, setTab] = useState<WorkspaceTab>(initialTabFromUrl);
+  // The workspace tab is part of the project's saved state. A URL carrying
+  // `?view=<tab id>` (host embedding) wins over the stored tab, see initialTabFromUrl.
+  const [tab, setTab] = usePersistedState<WorkspaceTab>(
+    'ui:app:tab',
+    'Welcome',
+    new URLSearchParams(window.location.search).get('view')?.trim() ? initialTabFromUrl() : undefined,
+  );
   /** A composite the Build map asked to open in the Composites tab. */
   const [compositeFocus, setCompositeFocus] = useState<string | null>(null);
   /** A composite whose edit form is open in a popup over the current tab. */
@@ -384,7 +387,7 @@ function AppInner() {
     if (stop.tab) setTab(stop.tab);
     if (stop.runDialog === 'open') setRunDialogOpen(true);
     else if (stop.runDialog === 'closed') setRunDialogOpen(false);
-  }, [guide]);
+  }, [guide, setTab]);
   // Training state lives here, not in TrainingView: a learner spends most of a
   // tutorial in OTHER views doing the work, and the top bar has to offer a way
   // back the whole time. TrainingView is unmounted for most of that.
@@ -433,7 +436,7 @@ function AppInner() {
     const key = dest === 'Market' ? 'ui:market-section' : 'ui:analysis-section';
     try { window.localStorage.setItem(key, JSON.stringify(section)); } catch { /* ignore */ }
     setTab(dest);
-  }, []);
+  }, [setTab]);
   // An embedding host (Bifrost's Ragnarok tab) asking us to show something. The
   // agent can then point at the map instead of describing where to look. The
   // listener validates origin and whitelists the tab; `select` is data the view
@@ -451,7 +454,7 @@ function AppInner() {
       }
       setTab(dest);
     });
-  }, []);
+  }, [setTab]);
 
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
@@ -492,13 +495,13 @@ function AppInner() {
   // below clears it — and only when that asset is genuinely absent from the
   // current results.
   const [analyticsFocus, setAnalyticsFocus] = usePersistedState<AnalyticsFocus>('ui:analytics-focus', { type: 'system' });
-  const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
+  const [chartSections, setChartSections] = usePersistedState<ChartSectionConfig[]>('ui:app:chart-sections', []);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   // Master-model dialog (Model toolbar → Master…): import a multi-year master
   // and derive a filtered working model from it.
   const [masterDialogOpen, setMasterDialogOpen] = useState(false);
   const [pypsaIoOpen, setPypsaIoOpen] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
+  const [dryRun, setDryRun] = usePersistedState<boolean>('ui:app:dry-run', false);
   const [backendRuns, setBackendRuns] = useState<BackendRunMeta[]>([]);
   // Temporal sheet name → row count in the backend session. Time-series sheets
   // are stripped from the in-memory model (held server-side, paged on demand),
@@ -529,7 +532,7 @@ function AppInner() {
   // Name of the backend run currently shown in the viewer — drives the
   // Comparison "active" column highlight. Set after a run completes (to the
   // newest stored meta) and when opening a stored run.
-  const [activeRunName, setActiveRunName] = useState<string | null>(null);
+  const [activeRunName, setActiveRunName] = usePersistedState<string | null>('ui:app:active-run-name', null);
   // Per-component output series fetched on demand for the active run. The light
   // "View" bundle strips them (`outputs.series = null`); without them the
   // per-asset analytics (generator / storage / bus / branch charts and the map
@@ -619,7 +622,7 @@ function AppInner() {
     );
     if (isTabModule(tab) && !enabledModules.has(tab)) setTab('Welcome');
     else if (!isTabModule(tab) && !KNOWN_CORE_TABS.has(tab) && !knownExternal) setTab('Welcome');
-  }, [tab, enabledModules, externalModules.installed]);
+  }, [tab, enabledModules, externalModules.installed, setTab]);
   const [scenarioCatalog, setScenarioCatalog] = useState<ScenarioCatalog>(() => defaultScenarioCatalog({
     snapshotStart: RUN_WINDOW.initialSnapshotStart,
     snapshotEnd: RUN_WINDOW.defaultSnapshotEnd,
@@ -1095,9 +1098,13 @@ function AppInner() {
     // list lives in in-memory React state and is never persisted). Each entry
     // carries its own topology + results snapshot, so it stays self-contained
     // even after the live model is replaced. Do NOT clear it here.
-    setChartSections([]);
+    // A restore/rehydrate (pushToSession:false) keeps the state it just restored;
+    // a fresh load of a different model starts from a clean view.
+    if (opts?.pushToSession !== false) {
+      setChartSections([]);
+      setAnalyticsFocus({ type: 'system' });
+    }
     setValidateResult(null);
-    setAnalyticsFocus({ type: 'system' });
     const fallbackPathway = {
       ...nextPathway,
       selectedPeriod: getDefaultSelectedPeriod(nextPathway),
@@ -1206,6 +1213,7 @@ function AppInner() {
     trackModelPush,
     presentCostBasisMigration,
     applyScenarioConfigs,
+    setChartSections,
   ]);
 
   const prepareModelForBackend = useCallback((source: WorkbookModel): WorkbookModel => {
@@ -1260,7 +1268,7 @@ function AppInner() {
       setActiveRunName(null);
       showToast('Network reduced — clustered model loaded into the editor', 'success');
     },
-    [resetForNewModel, showToast],
+    [resetForNewModel, showToast, setActiveRunName],
   );
 
   // Forge → temporal clustering (P35). Same flow as network clustering: sync the
@@ -1279,7 +1287,7 @@ function AppInner() {
       setActiveRunName(null);
       showToast('Time axis reduced — clustered model loaded into the editor', 'success');
     },
-    [resetForNewModel, showToast],
+    [resetForNewModel, showToast, setActiveRunName],
   );
 
   // Forge → set a carrier's total capacity to a target. Sync the working model
@@ -1316,7 +1324,7 @@ function AppInner() {
       showToast(`Carrier capacity updated — ${opts.carrier} set to ${opts.targetMw} MW`, 'success');
       return result;
     },
-    [model, prepareModelForBackend, resetForNewModel, showToast],
+    [model, prepareModelForBackend, resetForNewModel, showToast, setActiveRunName],
   );
 
   /**
@@ -1516,7 +1524,7 @@ function AppInner() {
         showToast(e instanceof Error ? e.message : 'Resample failed', 'error');
       }
     },
-    [model, prepareModelForBackend, resetForNewModel, showToast],
+    [model, prepareModelForBackend, resetForNewModel, showToast, setActiveRunName],
   );
 
   // Visible action: fill objective / stores / generators of the snapshots sheet from the timestamp spacing.
@@ -1544,7 +1552,7 @@ function AppInner() {
   const handleOpenInSiting = useCallback((handoff: SitingHandoff) => {
     setSitingHandoff(handoff);
     setTab('Siting');
-  }, []);
+  }, [setTab]);
 
   // Server-side visible actions (model-check fixes, Forge clean-ups) read the SESSION workbook: push the browser's working
   // model first, and pull the session back after the server wrote sheets (reloadSessionModel).
@@ -1757,6 +1765,7 @@ function AppInner() {
               setSnapshotEnd(controls.snapshotEnd);
             }
             setForceLp(controls.forceLp);
+            if (typeof controls.dryRun === 'boolean') setDryRun(controls.dryRun);
             if (controls.constraints) setConstraints(controls.constraints);
             // Re-apply the last live rolling/pathway AFTER resetForNewModel, so a
             // restored scenario's defaults can't quietly flip them back.
@@ -1797,7 +1806,7 @@ function AppInner() {
     const id = window.setTimeout(() => {
       void saveSessionControls({
         filename, carbonPrice, carbonPriceSchedule,
-        snapshotStart, snapshotEnd, snapshotWeight, forceLp,
+        snapshotStart, snapshotEnd, snapshotWeight, forceLp, dryRun,
         constraints, rollingConfig, samplingConfig, pathwayConfig,
         scenario: captureCurrentScenario(),
         savedAt: Date.now(),
@@ -1806,7 +1815,7 @@ function AppInner() {
     return () => window.clearTimeout(id);
     // captureCurrentScenario changes with every live control, run-mode configs
     // included, so any of them re-persists.
-  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, samplingConfig, pathwayConfig, captureCurrentScenario]);
+  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, dryRun, constraints, rollingConfig, samplingConfig, pathwayConfig, captureCurrentScenario]);
 
   // Structural static-model changes (column ops, clear, reorder, undo/redo)
   // have no row-op equivalent — they request ONE static-merge resync here.
@@ -1881,13 +1890,20 @@ function AppInner() {
   const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  const resultsEverLoadedRef = useRef(false);
   useEffect(() => {
     // Reset focus to 'system' when results disappear or the previously-focused
     // asset is no longer present. Guarded so we never call setState if the
     // focus is already 'system' (otherwise a new {type:'system'} object would
     // trigger an infinite re-render loop on every effect tick).
+    if (displayResults) resultsEverLoadedRef.current = true;
     if (analyticsFocus.type === 'system') return;
-    if (!displayResults) { setAnalyticsFocus({ type: 'system' }); return; }
+    // Right after boot the restored focus must survive until results have had a
+    // chance to load; only a loss of results loaded in this page resets it.
+    if (!displayResults) {
+      if (resultsEverLoadedRef.current) setAnalyticsFocus({ type: 'system' });
+      return;
+    }
     if (analyticsFocus.type === 'generator' && displayResults.assetDetails.generators[analyticsFocus.key]) return;
     if (analyticsFocus.type === 'bus' && displayResults.assetDetails.buses[analyticsFocus.key]) return;
     if (analyticsFocus.type === 'storageUnit' && displayResults.assetDetails.storageUnits[analyticsFocus.key]) return;
@@ -2293,7 +2309,7 @@ function AppInner() {
       setActiveRunName(null);
       showToast(message, 'success');
     },
-    [resetForNewModel, showToast],
+    [resetForNewModel, showToast, setActiveRunName],
   );
 
   const handleExportNetcdf = () =>
@@ -2789,8 +2805,10 @@ function AppInner() {
       // A load, not an edit: nothing before it may be undone into the new model.
       clearHistory();
       userLoadedRef.current = true;
+      // This project's settings replace the browser's once it is in the session (lib/appState).
+      disarmAppStateCapture();
       const restoredModel = structuredClone(entry.model);
-      setModel(restoredModel);
+      setModel(withoutAppStateSheet(restoredModel));
       // The session is the source of truth and runs submit by sessionId — push
       // the FULL restored model (incl. its time-series; a static merge would
       // leave the previous model's series in place and the next run would solve
@@ -2799,7 +2817,17 @@ function AppInner() {
       // `entry.model` here is only the static topology) — re-pushing would wipe
       // the series.
       if (!opts?.sessionAlreadyLoaded) {
-        void trackModelPush(putSessionModel(restoredModel, { filename: entry.label ?? '' }));
+        // The full model goes to the server WITH its settings sheets (RAGNAROK_AppState / RunSettings), which the
+        // server folds into the project's settings; then the browser adopts them.
+        void trackModelPush(putSessionModel(restoredModel, { filename: entry.label ?? '' }).then((meta) => {
+          void adoptProjectAppState();
+          return meta;
+        }).catch((error: unknown) => {
+          void adoptProjectAppState();
+          throw error;
+        }));
+      } else {
+        void adoptProjectAppState();
       }
       // Make the Model tree list the imported temporal sheets. When we pushed the
       // FULL model (project-file import) its series rows are right here, so count
@@ -2878,6 +2906,7 @@ function AppInner() {
   // source of truth for run history). These handlers list, open, download, and
   // delete those runs; `backendRuns` powers both the History tab and Analytics
   // → Comparison.
+  const runsValidatedRef = useRef(false);
   const refreshBackendRuns = useCallback(async (): Promise<BackendRunMeta[]> => {
     try {
       const resp = await fetch(`${API_BASE}/api/runs`);
@@ -2885,12 +2914,18 @@ function AppInner() {
       const data = await resp.json();
       const runs: BackendRunMeta[] = Array.isArray(data.runs) ? data.runs : [];
       setBackendRuns(runs);
+      // A restored active run that no longer exists in History falls back to none
+      // (checked once, on the first successful listing of this page lifetime).
+      if (!runsValidatedRef.current) {
+        runsValidatedRef.current = true;
+        setActiveRunName((current) => (current && !runs.some((r) => r.name === current) ? null : current));
+      }
       return runs;
     } catch {
       // Backend unreachable — leave the list as-is.
       return [];
     }
-  }, []);
+  }, [setActiveRunName]);
 
   useEffect(() => {
     void refreshBackendRuns();
@@ -2920,7 +2955,7 @@ function AppInner() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Rename failed.', 'error');
     }
-  }, [showToast]);
+  }, [showToast, setActiveRunName]);
 
   // Auto-refresh the History list while the History tab is open, so a run that
   // finishes elsewhere (or an import) appears without a browser reload. Polling

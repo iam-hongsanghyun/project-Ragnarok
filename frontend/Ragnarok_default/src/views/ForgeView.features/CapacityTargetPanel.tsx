@@ -62,7 +62,7 @@ export function CapacityTargetPanel({ model, onScaleCarrierCapacity, onStatus }:
   const [target, setTarget] = usePersistedState<number>('ui:forge-captarget-mw', 0);
   const [method, setMethod] = usePersistedState<Method>('ui:forge-captarget-method', 'proportional');
   const [mode, setMode] = usePersistedState<Mode>('ui:forge-captarget-mode', 'cap');
-  const [shares, setShares] = useState<Record<string, number>>({});
+  const [shares, setShares] = usePersistedState<Record<string, number>>('ui:forge:capacity-target:shares', {});
   const [busy, setBusy] = useState(false);
 
   const activeCarrier = carriers.includes(carrier) ? carrier : (carriers[0] ?? '');
@@ -87,7 +87,7 @@ export function CapacityTargetPanel({ model, onScaleCarrierCapacity, onStatus }:
       });
       return next;
     });
-  }, [method, activeCarrier, carrierGens]);
+  }, [method, activeCarrier, carrierGens, setShares]);
 
   const shareSum = useMemo(
     () => carrierGens.reduce((s, g) => s + num(shares[String(g.name)]), 0),

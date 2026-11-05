@@ -35,8 +35,8 @@ const isActive = (s: BuildJobStatus['status'] | undefined) => s === 'queued' || 
 
 export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
   const [avail, setAvail] = useState<PypsaEarthAvailability | null>(null);
-  const [horizon, setHorizon] = useState(2030);
-  const [clusters, setClusters] = useState(10);
+  const [horizon, setHorizon] = usePersistedState('ui:pypsa-earth:horizon', 2030);
+  const [clusters, setClusters] = usePersistedState('ui:pypsa-earth:clusters', 10);
   const [jobId, setJobId] = usePersistedState<string | null>(KEY_JOB, null);
   const [appliedIds, setAppliedIds] = usePersistedState<string[]>(KEY_APPLIED, []);
   const [job, setJob] = useState<BuildJobStatus | null>(null);

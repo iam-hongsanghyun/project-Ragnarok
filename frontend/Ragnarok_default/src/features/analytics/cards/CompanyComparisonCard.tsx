@@ -12,6 +12,7 @@
 import React from 'react';
 import { CompanyComparison, CompanyRow, fetchRunCompanies } from 'lib/api/resultsDerived';
 import { useAsync } from '../../../shared/hooks/useAsync';
+import { usePersistedState } from '../../../shared/hooks/usePersistedState';
 
 type CompanyComparisonData = Pick<CompanyComparison, 'currency' | 'sortedBy' | 'metrics' | 'items'>;
 
@@ -20,6 +21,8 @@ interface Props {
   runName?: string | null;
   /** Pathway investment period; null/absent = the whole horizon. */
   period?: number | null;
+  /** Card id; scopes the saved sort and bar metric to this card. */
+  instanceId?: string;
 }
 
 const money = (v: number, cur: string) => `${v < 0 ? '−' : ''}${cur}${Math.abs(Math.round(v)).toLocaleString()}`;
@@ -40,7 +43,8 @@ const valueOf = (r: CompanyRow, key: string): number | null => {
   return v === undefined ? null : v;
 };
 
-function ComparisonTable({ data, sortKey, onSort, busy }: {
+function ComparisonTable({ data, sortKey, onSort, busy, instanceId }: {
+  instanceId: string;
   data: CompanyComparisonData;
   sortKey: string;
   onSort: (key: string) => void;
@@ -48,7 +52,7 @@ function ComparisonTable({ data, sortKey, onSort, busy }: {
 }) {
   const cur = data.currency;
   const { metrics } = data;
-  const [barKey, setBarKey] = React.useState<string | null>(null);
+  const [barKey, setBarKey] = usePersistedState<string | null>(`ui:card:company-comparison:${instanceId}:bar-key`, null);
   const sortMetric = metrics.find((m) => m.key === sortKey) ?? metrics[0];
   const barMetric = metrics.find((m) => m.key === barKey) ?? metrics[0];
   const barMax = Math.max(1, ...data.items.map((r) => Math.abs(valueOf(r, barMetric.key) ?? 0)));
@@ -120,8 +124,8 @@ function ComparisonTable({ data, sortKey, onSort, busy }: {
   );
 }
 
-export function CompanyComparisonCard({ runName, period = null }: Props) {
-  const [sortKey, setSortKey] = React.useState<string | undefined>(undefined);
+export function CompanyComparisonCard({ runName, period = null, instanceId = 'default' }: Props) {
+  const [sortKey, setSortKey] = usePersistedState<string | undefined>(`ui:card:company-comparison:${instanceId}:sort-key`, undefined);
   const { data, loading, error } = useAsync(
     runName ? `${runName}|${sortKey ?? ''}|${period ?? ''}` : null,
     () => fetchRunCompanies(runName as string, sortKey, period),
@@ -129,5 +133,5 @@ export function CompanyComparisonCard({ runName, period = null }: Props) {
   if (!runName) return <p className="dashboard-cell-missing">The company comparison is read from a stored run; this result has none.</p>;
   if (error) return <p className="dashboard-cell-missing" role="alert">Could not load the company comparison: {error}</p>;
   if (!data) return <p className="dashboard-cell-missing" aria-busy="true">Loading company comparison…</p>;
-  return <ComparisonTable data={data} sortKey={sortKey ?? data.sortedBy} onSort={setSortKey} busy={loading} />;
+  return <ComparisonTable instanceId={instanceId} data={data} sortKey={sortKey ?? data.sortedBy} onSort={setSortKey} busy={loading} />;
 }
