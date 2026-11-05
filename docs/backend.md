@@ -1701,7 +1701,8 @@ scattered files. Rows are stored one-per-row as JSON in
 `sheet_<i>(__row INTEGER PRIMARY KEY, d TEXT)` tables (series sheets too: one
 row per snapshot). This sidesteps SQLite's 2000-column limit and the quoting
 that literal asset-name columns would require. A `_kv` table holds the JSON
-values `meta`, `tables` (sheet name → table name), and `controls`.
+values `meta` and `tables` (sheet name → table name). The file format itself is
+specified in [project-file.md](./project-file.md).
 
 Engine-specific behaviour:
 

@@ -32,6 +32,7 @@ All documentation lives in [docs/](./docs/) (start at the [docs index](./docs/RE
 | [docs/bifrost-agent.md](./docs/bifrost-agent.md) | MCP server (Bifrost): tool catalog, scenario authoring tools, client setup |
 | [docs/plugin.md](./docs/plugin.md) | Building a plugin (frontend JS or backend Python): manifest, GUI schema, hooks, own server, examples |
 | [docs/module.md](./docs/module.md) | Modules: core vs module tabs, Settings → Modules, and authoring a module (a whole tab, first- or third-party) |
+| [docs/project-file.md](./docs/project-file.md) | Project file format: what `project.db` (input) and a run `.db` (output) hold, and building one by script |
 | [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated support matrix (`npm run generate:support-matrix`) |
 | [docs/TODO.md](./docs/TODO.md) | Living project task log and roadmap |
 

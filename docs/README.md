@@ -16,6 +16,7 @@ The manual is six documents:
 
 Supporting material:
 
+- [project-file.md](./project-file.md) — the SQLite project (`project.db`) and run (`<run>.db`) file format: what an input model holds, what a run stores, and how to build one by script.
 - [SUPPORT_MATRIX.md](./SUPPORT_MATRIX.md) — generated PyPSA feature/attribute support matrix.
 - [TODO.md](./TODO.md) — living project task log and roadmap.
 
