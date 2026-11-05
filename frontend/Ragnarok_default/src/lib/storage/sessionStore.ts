@@ -66,19 +66,6 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-function put(key: string, value: unknown): Promise<void> {
-  return openDb().then(
-    (db) =>
-      new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(value, key);
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror = () => { db.close(); reject(tx.error); };
-        tx.onabort = () => { db.close(); reject(tx.error); };
-      }),
-  );
-}
-
 function get<T>(key: string): Promise<T | null> {
   return openDb().then(
     (db) =>
@@ -92,10 +79,14 @@ function get<T>(key: string): Promise<T | null> {
 }
 
 
+/** localStorage key of the live run controls. In localStorage (not IndexedDB) so they travel with the
+ *  project like every other setting (lib/appState). */
+export const CONTROLS_STORAGE_KEY = 'ragnarok:session:controls';
+
 /** Persist the lightweight run controls. Best-effort. */
 export async function saveSessionControls(controls: SessionControls): Promise<void> {
   try {
-    await put(CONTROLS_KEY, controls);
+    window.localStorage.setItem(CONTROLS_STORAGE_KEY, JSON.stringify(controls));
   } catch {
     /* best effort */
   }
@@ -107,10 +98,36 @@ export async function saveSessionControls(controls: SessionControls): Promise<vo
  * boot must not pay to read a (possibly stale, multi-MB) model record here. */
 export async function loadSessionControls(): Promise<SessionControls | null> {
   try {
-    return await get<SessionControls>(CONTROLS_KEY);
+    const raw = window.localStorage.getItem(CONTROLS_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as SessionControls;
+  } catch {
+    /* fall through to the IndexedDB copy older builds wrote */
+  }
+  // One-off move of the copy older builds kept in IndexedDB: read it once, keep it in localStorage (where it
+  // travels with the project) and delete it, so a project opened later without controls never inherits it.
+  try {
+    const legacy = await get<SessionControls>(CONTROLS_KEY);
+    if (legacy) {
+      window.localStorage.setItem(CONTROLS_STORAGE_KEY, JSON.stringify(legacy));
+      await deleteKey(CONTROLS_KEY);
+    }
+    return legacy;
   } catch {
     return null;
   }
+}
+
+function deleteKey(key: string): Promise<void> {
+  return openDb().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(key);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+        tx.onabort = () => { db.close(); reject(tx.error); };
+      }),
+  );
 }
 
 /** Remove only the persisted model (the "Clear" button — keeps controls/settings). */

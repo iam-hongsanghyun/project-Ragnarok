@@ -33,7 +33,9 @@ async def events(
         events_bus.sse_stream(session_id, last),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            # no-transform: a compressing proxy (the dev server's, a CDN) must not gzip the stream —
+            # gzip buffers it, so the browser never sees the headers and EventSource never opens.
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # never proxy-buffer an event stream
         },

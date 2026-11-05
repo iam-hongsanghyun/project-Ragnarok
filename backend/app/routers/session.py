@@ -13,6 +13,8 @@ Endpoints::
     GET    /api/session/sheet/{name}     -> one page of rows
     GET    /api/session/series/{name}    -> windowed + downsampled series slice
     POST   /api/session/clear            -> {cleared: bool}
+    GET    /api/session/app-state        -> {state: {key: value} | null}
+    PUT    /api/session/app-state        -> {state: {key: value}} (every app setting of the project)
 
 ``session_id`` defaults to ``"default"`` (single-user, one machine). It is a
 first-class parameter everywhere so a remote, multi-session deployment is a
@@ -111,6 +113,40 @@ def get_meta(session_id: str = Query("default", alias="session_id")) -> dict:
     if migration is not None:
         out["costBasisMigration"] = migration
     return out
+
+
+class AppStatePayload(BaseModel):
+    """Body for ``PUT /api/session/app-state``.
+
+    ``state`` maps a setting key to its value, verbatim (the browser's ``localStorage`` strings).
+    ``replace`` (default) stores exactly this set; ``replace=false`` merges these keys in, and a
+    ``null`` value removes that key. ``source`` names the writer: anything but ``"browser"`` (an
+    agent, a script) also tells open browsers to re-apply the project's settings.
+    """
+
+    state: dict[str, str | None]
+    replace: bool = True
+    sessionId: str = "default"
+    source: str = "browser"
+
+
+@router.get("/app-state")
+def get_app_state(session_id: str = Query("default", alias="session_id")) -> dict:
+    """Every app setting the project holds (``docs/project-file.md`` §5); ``state`` is ``null`` with no project."""
+    return {"state": model_store.get_app_state(session_id)}
+
+
+@router.put("/app-state")
+def put_app_state(payload: AppStatePayload) -> dict:
+    """Store the project's app settings (see :class:`AppStatePayload`). 409 when no project is loaded."""
+    state = model_store.set_app_state(payload.sessionId, payload.state, replace=payload.replace)  # type: ignore[arg-type]
+    if state is None:
+        raise HTTPException(status_code=409, detail="No project is loaded in this session; load or build a model first.")
+    if payload.source != "browser":
+        from .. import events_bus
+
+        events_bus.publish(payload.sessionId, "session.appState", {"keys": sorted(payload.state)})
+    return {"state": state}
 
 
 @router.post("/migration/ack")

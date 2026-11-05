@@ -104,8 +104,9 @@ Semantics:
 | unknown ids | silently dropped (a renamed module, or a file from a newer version) |
 
 Defaults live in `src/config/app_config.json` under `settings.defaults`; the
-per-install value is in `localStorage` (`project_ragnarok_settings`, which
-neither cache reset clears). **External module packages are not stored in the
+value lives in the project (`project_ragnarok_settings` in its `_app_state`,
+[project-file.md](./project-file.md) §5), so opening a project brings its tabs
+back. **External module packages are not stored in the
 browser at all** — they live on the server, with their own enabled flag; see §7.
 
 ## 4. Writing an external module

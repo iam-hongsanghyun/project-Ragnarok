@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import { ConfigBootstrap } from './ConfigBootstrap';
+import { restoreAtBoot } from 'lib/appState/appState';
 
 /**
  * Wipe stale, build-coupled state when the bundle ID changes.
@@ -93,13 +94,24 @@ if (NativeResizeObserver) {
   };
 }
 
-const root = ReactDOM.createRoot(
-  document.getElementById('root') as HTMLElement
-);
-root.render(
-  <React.StrictMode>
-    <ConfigBootstrap>
-      <App />
-    </ConfigBootstrap>
-  </React.StrictMode>
-);
+// The project's settings become the browser's BEFORE the first render, so every component mounts with the
+// project's values (lib/appState). A slow or absent backend does not hold the app: it boots after the timeout
+// on the browser's own values.
+const BOOT_RESTORE_TIMEOUT_MS = 4000;
+let rendered = false;
+void Promise.race([
+  restoreAtBoot(() => rendered),
+  new Promise<void>((resolve) => { window.setTimeout(resolve, BOOT_RESTORE_TIMEOUT_MS); }),
+]).finally(() => {
+  rendered = true;
+  const root = ReactDOM.createRoot(
+    document.getElementById('root') as HTMLElement
+  );
+  root.render(
+    <React.StrictMode>
+      <ConfigBootstrap>
+        <App />
+      </ConfigBootstrap>
+    </React.StrictMode>
+  );
+});

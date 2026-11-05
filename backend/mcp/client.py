@@ -738,6 +738,28 @@ class RagnarokClient:
         path = "/api/import/project" if persist else "/api/import/project/load"
         return await self._request("POST", path, files=files)
 
+    # ── project file (project.db) and the project's app state ─────────────────
+    async def project_file_guide(self) -> Any:
+        return await self._get("/api/project-file/guide")
+
+    async def build_project_file(self, body: dict[str, Any]) -> tuple[bytes, str | None]:
+        return await self._request_bytes("POST", "/api/project-file/build", json=body)
+
+    async def export_project_file(self) -> tuple[bytes, str | None]:
+        return await self._request_bytes("GET", "/api/project-file", params={"session_id": self.session_id})
+
+    async def open_project_file(self, data: bytes, filename: str) -> Any:
+        return await self._upload("/api/project-file", data, filename, {"session_id": self.session_id})
+
+    async def get_app_state(self) -> Any:
+        return await self._get("/api/session/app-state", {"session_id": self.session_id})
+
+    async def set_app_state(self, state: dict[str, str | None], *, replace: bool) -> Any:
+        return await self._put(
+            "/api/session/app-state",
+            {"state": state, "replace": replace, "sessionId": self.session_id, "source": "mcp"},
+        )
+
     async def _upload(self, path: str, data: bytes, filename: str, params: dict[str, Any] | None = None) -> Any:
         files = {"file": (filename, data, "application/octet-stream")}
         return await self._request("POST", path, files=files, params=_clean(params))

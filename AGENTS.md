@@ -25,6 +25,7 @@ If `uv` is not yet adopted, fall back to `pip install -e ".[dev]"` and `pytest` 
 - **Reproducibility**: pin random seeds (`numpy.random.default_rng(seed)` over the legacy global API). Commit `uv.lock`. Pin upstream versions.
 - **Units**: use `pint` for any quantity with physical units (energy, power, currency rates, time-of-day). Don't pass bare floats across module boundaries when units matter.
 - **Numerical correctness**: when changing math, add a test against an analytical solution OR a captured baseline (`np.testing.assert_allclose` with explicit `rtol`/`atol`).
+- **Settings live in the project**: every app setting — Settings, enabled modules, each module's and plugin's options, run controls — is saved in the project (`project.db` `_app_state`) and restored exactly when it is opened. A new setting needs no extra code if it is a `localStorage` key under a project prefix; never keep one only in the browser or in a server-side sidecar. Spec: `docs/project-file.md`.
 
 ## Logging
 

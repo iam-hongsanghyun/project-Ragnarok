@@ -724,6 +724,11 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
             continue
         if sheet in _META_SHEETS:
             continue  # PluginConfigs / Provenance / RunHistory — not needed in the bundle
+        if sheet.startswith("RAGNAROK_"):
+            # A model-side Ragnarok sheet (scenarios, pathway, module inputs, the app state):
+            # it belongs to the model, which is what restores the project's settings.
+            model[sheet] = rows
+            continue
 
         # Output time-series sheet?
         comp_sheet, dash, attr = sheet.partition("-")

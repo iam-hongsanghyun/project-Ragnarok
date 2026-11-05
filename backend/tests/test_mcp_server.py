@@ -249,7 +249,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 220, f"expected 220 tools, got {len(tools)}"
+    assert len(tools) == 225, f"expected 225 tools, got {len(tools)}"
     # check_model: reads the model back so "is this what I asked for?" can be
     # answered against the model rather than against the agent's account of it.
     assert "check_model" in by_name
@@ -282,6 +282,9 @@ def test_tool_catalog_and_annotations() -> None:
     ro = {t.name for t in tools if t.annotations and t.annotations.readOnlyHint}
     assert ro == {
         "tool_catalogue",
+        # The project-file format guide and the project's app settings (read).
+        "describe_project_file",
+        "get_app_state",
         "check_model",
         "list_importers",
         "source_health",
@@ -758,3 +761,37 @@ def test_driver_forecast_grow_sheets_and_weight(monkeypatch) -> None:
     call = next(c for c in fake.calls if c[0] == "driver_forecast")
     assert call[3]["growSheets"] == ["loads-p_set", "loads-p_min_pu"]
     assert call[3]["snapshotWeight"] == 3.0
+
+
+# ── project file + app state tools ─────────────────────────────────────────────────
+def test_project_file_tools(monkeypatch, tmp_path) -> None:
+    fake = _install(monkeypatch, autonomy="auto")
+
+    async def build_project_file(body):
+        fake.calls.append(("build_project_file", body))
+        return b"SQLite format 3\x00...", "m.db"
+
+    async def get_app_state():
+        return {"state": {"ragnarok:settings": "{}"}}
+
+    async def set_app_state(state, *, replace):
+        fake.calls.append(("set_app_state", state, replace))
+        return {"state": state}
+
+    async def project_file_guide():
+        return {"path": "docs/project-file.md", "markdown": "# Project file format"}
+
+    fake.build_project_file = build_project_file
+    fake.get_app_state = get_app_state
+    fake.set_app_state = set_app_state
+    fake.project_file_guide = project_file_guide
+    monkeypatch.setenv("RAGNAROK_MCP_OUTPUT_DIR", str(tmp_path))
+    dest = tmp_path / "out.db"
+    out = asyncio.run(server.build_project_file({"buses": [{"name": "b"}]}, dest=str(dest), app_state={"k": "v"}))
+    assert out["status"] == "built" and dest.read_bytes().startswith(b"SQLite format 3")
+    assert fake.calls[-1][1]["appState"] == {"k": "v"}
+    assert asyncio.run(server.get_app_state())["state"] == {"ragnarok:settings": "{}"}
+    asyncio.run(server.set_app_state({"ui:x": "1"}, confirm=True))
+    assert fake.calls[-1] == ("set_app_state", {"ui:x": "1"}, False)
+    guide = asyncio.run(server.describe_project_file())
+    assert guide["markdown"].startswith("# Project file format") and "build_project_file" in guide["tools"]

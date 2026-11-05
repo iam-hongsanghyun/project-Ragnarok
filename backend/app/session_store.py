@@ -477,6 +477,36 @@ def load_full_model(
     return model
 
 
+# ── app state (every app setting; parity with sqlite_store) ───────────────────────
+
+def _app_state_path(session_id: str) -> Path:
+    return _session_dir(session_id) / "app_state.json"
+
+
+def get_app_state(session_id: str) -> dict[str, str] | None:
+    if not _is_safe_id(session_id) or get_meta(session_id) is None:
+        return None
+    path = _app_state_path(session_id)
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to read app state for %s", session_id)
+        return {}
+
+
+def set_app_state(session_id: str, state: dict[str, str], *, replace: bool = True) -> dict[str, str] | None:
+    if not _is_safe_id(session_id) or get_meta(session_id) is None:
+        return None
+    current = {} if replace else (get_app_state(session_id) or {})
+    for key, value in state.items():
+        if value is None:
+            current.pop(str(key), None)
+        else:
+            current[str(key)] = str(value)
+    _app_state_path(session_id).write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+    return current
+
+
 # ── controls (model-bound run settings; NO rolling-horizon) ───────────────────────
 
 def save_controls(session_id: str, controls: dict[str, Any]) -> None:

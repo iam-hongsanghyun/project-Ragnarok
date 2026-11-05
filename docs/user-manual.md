@@ -142,9 +142,12 @@ browsers), the picker falls back to a standard file dialog. In that case,
 
 ### Importing a project
 
-A project file contains both model inputs and solved outputs in one `.xlsx` file.
-Use **Import Project** (in the file toolbar) when you have a file previously
-exported with **Export Project**. The full run state — inputs, results, and run
+A project carries every app setting with it — enabled modules, each module's
+options, run controls, plugin settings — and opening it restores them exactly
+(the page reloads once to apply them). **Save Project File** writes the project
+as one `.db` file; an exported project workbook (`.xlsx`) carries inputs, solved
+outputs and the same settings. Use **Import Project** (in the file toolbar) to
+open either. The full run state — inputs, results, and run
 settings — is restored, and a history entry is added to the run history rail.
 
 ### Sheet tree
@@ -238,8 +241,9 @@ All file operations are in the file toolbar at the top of the Model view.
 | Open | Load a `.xlsx` workbook (inputs only). |
 | Save | Write inputs back to the open file handle (Chromium only). Falls back to Save As if no handle is available. |
 | Save As | Open a save dialog and choose a new name and location. |
-| Import Project | Restore a previously exported project file (inputs + results + settings). |
+| Import Project | Open a project file (`.db`: the model and every app setting) or a previously exported project workbook (`.xlsx` / `.zip`: inputs + results + settings). |
 | Export Project | Save a `.xlsx` containing inputs, solved outputs, and run metadata. |
+| Save Project File | Save the project as one `.db` file: the model plus every app setting — enabled modules, each module's options, run controls, plugin settings ([project-file.md](./project-file.md)). |
 | Export Result | Save a results-only `.xlsx` (disabled until a run completes). |
 | More formats... | Expand additional import/export options (see [Exporting your work](#9-exporting-your-work)). |
 

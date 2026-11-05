@@ -772,7 +772,7 @@ training_m17_store 948,727.73; training_m16 626,611,133.65) are bit-identical be
 Multi-period models: PyPSA scales `overnight_cost` by each period's `nyears`; equal to the old figures while a period represents 8760 h.
 
 Where it runs: `sqlite_store._ensure_cost_basis` (any session `project.db` without the sheet - a bundled or older example - is migrated on
-first read; one journal entry records it, the report is kept in `_kv` and returned in `GET /api/session/meta` as
+first read; one journal entry records it, the report is kept in `_project` and returned in `GET /api/session/meta` as
 `costBasisMigration` until `POST /api/session/migration/ack`), and `save_model(..., legacy_origin=True)` (the browser opening an old
 Ragnarok workbook: `POST /api/session/model` with `origin: "legacy"`, `discountRate`). Any other `save_model` (an importer, a plugin, an
 agent, a PyPSA file) is stamped as current and not converted.
@@ -1669,7 +1669,7 @@ the `/api/session/*` contract is unchanged either way:
 | `get_sheet_page(session_id, sheet, offset, limit)` | One page of rows (static or series). |
 | `get_series_window(session_id, sheet, *, start, end, columns, max_points, agg)` | Windowed + downsampled series slice. |
 | `load_full_model(session_id, *, static_only)` | Reconstruct `{sheet: rows}`; `static_only=True` skips series sheets. |
-| `save_controls(session_id, controls)` / `get_controls(session_id)` | Model-bound run controls (carbon, window, constraints). Rolling-horizon config is intentionally never persisted — it resets on reload/import per the product rule; callers strip it. |
+| `get_app_state(session_id)` / `set_app_state(session_id, state, *, replace)` | The project's app settings `{key: value}` (every browser setting incl. the run controls; see [project-file.md](./project-file.md) §5). A `RAGNAROK_AppState` sheet in a saved model is split out into them. |
 | `patch_sheet(session_id, sheet, ops)` | Apply edit ops; returns updated `{name, kind, total, columns}`. |
 | `clear(session_id)` | Delete the session from disk; returns whether anything existed. |
 | `has_model(session_id)` | `get_meta(...) is not None`. |
@@ -1697,12 +1697,14 @@ the frontend keeps in memory):
 ### 11.2 `sqlite_store.py` — SQLite session store
 
 One `backend/data/session/<session_id>/project.db` per session — zero
-scattered files. Rows are stored one-per-row as JSON in
-`sheet_<i>(__row INTEGER PRIMARY KEY, d TEXT)` tables (series sheets too: one
-row per snapshot). This sidesteps SQLite's 2000-column limit and the quoting
-that literal asset-name columns would require. A `_kv` table holds the JSON
-values `meta` and `tables` (sheet name → table name). The file format itself is
-specified in [project-file.md](./project-file.md).
+scattered files: the model in a sheet catalog (`_sheets`) with one JSON-row
+table per sheet (`pypsa_<i>` / `config_<i>` / `other_<i>` by section), the
+project facts in `_project`, and every app setting in `_app_state`. The layout
+is specified in [project-file.md](./project-file.md); a version-1 file
+(`_kv` + `sheet_<i>`) is upgraded in place on first read (`_ensure_layout`).
+`get_app_state` / `set_app_state` read and write the settings; `export_file`,
+`import_file`, `validate_file` and `build_file` move a project file in and out
+(`/api/project-file`).
 
 Engine-specific behaviour:
 

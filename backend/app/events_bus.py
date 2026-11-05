@@ -125,6 +125,9 @@ async def sse_stream(session_id: str, last_id: int | None) -> AsyncIterator[str]
     """
     sub_id, queue, backlog = _register(session_id, last_id)
     try:
+        # A first byte at once: a proxy (the dev server's, a CDN) sends the response headers only with the
+        # first body chunk, so without it EventSource stays "connecting" until the first real event.
+        yield ": open\n\n"
         for item in backlog:
             yield sse_frame(*item)
         while True:

@@ -2766,7 +2766,7 @@ def test_every_course_checkpoint_is_a_listable_example() -> None:
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)
         try:
-            row = con.execute("SELECT v FROM _kv WHERE k = 'example'").fetchone()
+            row = con.execute("SELECT v FROM _project WHERE k = 'example'").fetchone()
         finally:
             con.close()
         assert row is not None, f"{example_id}: no example metadata, so it lists as a bare id"

@@ -946,6 +946,8 @@ def status() -> dict[str, Any]:
 # in one boot call.
 from .routers import config as _config_router  # noqa: E402
 app.include_router(_config_router.router)
+from .routers import project_file as _project_file_router  # noqa: E402
+app.include_router(_project_file_router.router)
 
 # External-data importer subsystem (Data view). The browser POSTs a
 # filter blob to /api/import/run; fetch + convert run server-side.
@@ -1122,6 +1124,31 @@ def _model_with_session_series(
     model: dict[str, list[dict[str, Any]]] | None,
     session_id: str | None,
 ) -> dict[str, list[dict[str, Any]]]:
+    """:func:`_session_series_only`, plus the project's app state as its ``RAGNAROK_AppState`` sheet, so an
+    exported workbook or package carries every setting of the project (``docs/project-file.md``)."""
+    out = _session_series_only(model, session_id)
+    if session_id and app_state_sheet_missing(out):
+        try:
+            from . import app_state
+
+            state = model_store.get_app_state(session_id)
+            if state:
+                out[app_state.SHEET] = app_state.to_rows(state)
+        except Exception:  # noqa: BLE001 — an export must not fail over the settings
+            logging.getLogger("pypsa_gui.exports").exception("Could not read the app state of session %s", session_id)
+    return out
+
+
+def app_state_sheet_missing(model: dict[str, Any]) -> bool:
+    from . import app_state
+
+    return not model.get(app_state.SHEET)
+
+
+def _session_series_only(
+    model: dict[str, list[dict[str, Any]]] | None,
+    session_id: str | None,
+) -> dict[str, list[dict[str, Any]]]:
     """Fill a client-posted model's MISSING time-series sheets from the session.
 
     The browser deliberately holds no time-series: the working model's series
@@ -1186,6 +1213,13 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
             raise HTTPException(
                 status_code=400, detail=f"No model loaded in session {payload.sessionId!r}."
             )
+        # The run keeps the settings it was solved with: the project's app state rides in the
+        # snapshot as its RAGNAROK_AppState sheet (the network build skips RAGNAROK_* sheets).
+        from . import app_state
+
+        state = model_store.get_app_state(payload.sessionId)
+        if state:
+            model = {**model, app_state.SHEET: app_state.to_rows(state)}
     else:
         raise HTTPException(
             status_code=400, detail="Run payload must include a model or a sessionId."
@@ -2220,7 +2254,7 @@ def _model_payload_to_network(payload: RunPayload):
     """
     from ..pypsa.network import build_components
 
-    model = _model_with_session_series(payload.model, payload.sessionId)
+    model = _session_series_only(payload.model, payload.sessionId)  # a PyPSA file carries no app settings
     network, _notes = build_components(model, payload.options or {})
     return network
 

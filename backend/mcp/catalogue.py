@@ -135,11 +135,13 @@ AREAS: dict[str, Area] = {
         Area(
             "files",
             "Files, projects and examples",
-            "Save and load the model as a workbook, project zip, PyPSA netCDF / HDF5 / Excel / CSV or a MATPOWER / pandapower case; "
-            "export a stored run; the multi-year master model; bundled examples.",
+            "Save and load the model as a project file (.db, model + every setting), workbook, project zip, PyPSA netCDF / HDF5 / "
+            "Excel / CSV or a MATPOWER / pandapower case; author a project file from another tool; export a stored run; the "
+            "multi-year master model; bundled examples.",
             ("export_workbook", "import_project", "export_model", "load_example"),
             "export save file workbook xlsx netcdf hdf5 csv zip project matpower pandapower import example sample network "
-            "master multi-year result download 파일 내보내기 저장 불러오기 예제 프로젝트",
+            "master multi-year result download project.db sqlite db project-file author build void pipeline format guide "
+            "파일 내보내기 저장 불러오기 예제 프로젝트 프로젝트파일 만들기 형식 가이드",
             (
                 ("save the model to a file", ("export_workbook", "export_model")),
                 (
@@ -158,6 +160,14 @@ AREAS: dict[str, Area] = {
                 (
                     "start from a bundled example",
                     ("list_examples", "load_example", "load_example(confirm=true)", "check_model"),
+                ),
+                (
+                    "make a Ragnarok project file from another tool (VOID, a script)",
+                    ("describe_project_file", "build_project_file", "import_project(confirm=true)", "check_model"),
+                ),
+                (
+                    "save the whole project, settings included",
+                    ("export_project_file",),
                 ),
                 (
                     "keep a multi-year master and work on one year",
@@ -638,11 +648,11 @@ AREAS: dict[str, Area] = {
         Area(
             "session",
             "Session, journal, server",
-            "Undo and journal of edits, revert, clear the session, server health and log, reload the schema, "
-            "and tool_catalogue (this routing).",
+            "Undo and journal of edits, revert, clear the session, the project's app settings (modules, run controls, "
+            "plugin settings), server health and log, reload the schema, and tool_catalogue (this routing).",
             ("tool_catalogue", "get_journal", "undo_journal_entry", "get_server_info"),
-            "undo journal revert history session clear server log health version catalogue routing "
-            "되돌리기 이력 세션 서버 상태",
+            "undo journal revert history session clear server log health version catalogue routing settings app state "
+            "enabled modules preferences currency solver threads 되돌리기 이력 세션 서버 상태 설정 모듈 켜기",
             (
                 (
                     "undo a bad edit",
@@ -652,6 +662,10 @@ AREAS: dict[str, Area] = {
                         "undo_journal_entry",
                         "undo_journal_entry(confirm=true)",
                     ),
+                ),
+                (
+                    "read or change the app settings the project carries",
+                    ("get_app_state", "set_app_state", "set_app_state(confirm=true)"),
                 ),
                 (
                     "is the server healthy and which build is it",

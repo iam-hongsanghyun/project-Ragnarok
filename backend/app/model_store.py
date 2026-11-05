@@ -30,8 +30,8 @@ get_meta = _impl.get_meta
 get_sheet_page = _impl.get_sheet_page
 get_series_window = _impl.get_series_window
 load_full_model = _impl.load_full_model
-save_controls = _impl.save_controls
-get_controls = _impl.get_controls
+get_app_state = _impl.get_app_state
+set_app_state = _impl.set_app_state
 patch_sheet = _impl.patch_sheet
 transform_series = _impl.transform_series
 clear = _impl.clear
@@ -93,7 +93,7 @@ def distinct_values(session_id: str, sheet: str, column: str) -> list[str] | Non
 
 __all__ = [
     "USE_SQLITE", "save_model", "merge_static_model", "merge_series_sheets", "get_meta", "get_sheet_page",
-    "get_series_window", "load_full_model", "save_controls", "get_controls",
+    "get_series_window", "load_full_model", "get_app_state", "set_app_state",
     "patch_sheet", "transform_series", "clear", "has_model", "is_series_sheet",
     "distinct_values", "resave_model", "get_cost_basis_migration", "acknowledge_cost_basis_migration",
 ]

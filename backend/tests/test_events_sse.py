@@ -107,6 +107,8 @@ def test_sse_stream_replays_then_heartbeats(monkeypatch) -> None:
 
     async def run():
         agen = events_bus.sse_stream("ssetest2", 1)
+        opened = await asyncio.wait_for(agen.__anext__(), timeout=2)
+        assert opened == ": open\n\n"  # a first byte at once, so a proxy forwards the headers
         replay = await asyncio.wait_for(agen.__anext__(), timeout=2)
         heartbeat = await asyncio.wait_for(agen.__anext__(), timeout=2)  # idle → hb
         events_bus.publish("ssetest2", "session.version", {"version": 3, "kind": "patch"})

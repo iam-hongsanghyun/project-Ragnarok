@@ -12,6 +12,8 @@ export interface FileToolbarProps {
   onSaveAs: () => void;
   onImportProject: () => void;
   onExportProject: () => void;
+  /** Download the project file (.db): model + every app setting (docs/project-file.md). */
+  onExportProjectFile: () => void;
   onOpenMasterModel: () => void;
   onImportCsvFolder: () => void;
   onExportCsvFolder: () => void;
@@ -30,7 +32,7 @@ export function FileToolbar(props: FileToolbarProps) {
       <button className="tb-btn" onClick={props.onSave}>Save</button>
       <button className="tb-btn" onClick={props.onSaveAs}>Save As</button>
       <div className="view-toolbar-sep" />
-      <button className="tb-btn" onClick={props.onImportProject} title="Open a project workbook (input + solved outputs) into the editor — re-run to add it to History">
+      <button className="tb-btn" onClick={props.onImportProject} title="Open a project file (.db, model + every setting) or a project workbook (.xlsx / .zip, input + solved outputs) into the editor">
         Import Project
       </button>
       <button
@@ -41,6 +43,13 @@ export function FileToolbar(props: FileToolbarProps) {
           : 'Export the project workbook (inputs only — no run yet)'}
       >
         Export Project
+      </button>
+      <button
+        className="tb-btn"
+        onClick={props.onExportProjectFile}
+        title="Save the project file (.db): the model and every app setting (modules, run controls, plugin settings) in one file"
+      >
+        Save Project File
       </button>
       <div className="view-toolbar-sep" />
       <button

@@ -1759,7 +1759,7 @@ async def import_network(path: str, replace: bool = True, confirm: bool = False)
 
 @mcp.tool(
     annotations=_MUT,
-    description="Import a Ragnarok Project .zip (or workbook .xlsx) from disk. persist=false loads it as the working model (like File→Open — no History entry, overwrites the current model); persist=true stores it as a History run instead (leaves the working model untouched, openable with full analytics). Gates like a model swap — re-call with confirm=true to apply.",
+    description="Import a Ragnarok project from disk: a project file .db (model + every app setting; opens as the working project), a Project .zip or a workbook .xlsx. persist=false loads it as the working model (like File→Open — no History entry, overwrites the current model); persist=true stores it as a History run instead (leaves the working model untouched, openable with full analytics). Gates like a model swap — re-call with confirm=true to apply.",
 )
 async def import_project(path: str, persist: bool = False, confirm: bool = False) -> Any:
     src = _resolve_in(path)
@@ -1773,12 +1773,90 @@ async def import_project(path: str, persist: bool = False, confirm: bool = False
         )
         return _preview(effect, {"path": str(src), "persist": persist})
     client = get_client()
+    if src.suffix.lower() in (".db", ".sqlite", ".sqlite3"):
+        if persist:
+            return {"error": "a project.db opens as the working project; persist=true (History) takes a .zip or .xlsx."}
+        out = await client.open_project_file(src.read_bytes(), src.name)
+        meta = out.get("meta") or {}
+        return {
+            "status": "loaded", "sheets": [s.get("name") for s in meta.get("sheets", [])],
+            "filename": meta.get("filename"), "settings": len(out.get("appState") or {}),
+        }
     out = await client.import_project_file(src.read_bytes(), src.name, persist=persist)
     if persist:
         return {"status": "stored", "run": out.get("name"), "meta": out.get("meta")}
     model = out.get("model") or {}
     await client.save_model(model)
     return {"status": "loaded", "sheets": sorted(model), "filename": out.get("filename")}
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="How to make a Ragnarok project file (project.db) — read this before building one for Ragnarok from another tool or MCP server (VOID, a script, a data pipeline). Returns the format specification (docs/project-file.md: SQLite layout, sheet names and kinds, PyPSA units, the RAGNAROK_* sheets, the app-state settings, the run file) and the steps: assemble {sheet: rows}, then build_project_file to write the .db, import_project to open it.",
+)
+async def describe_project_file() -> Any:
+    guide = await get_client().project_file_guide()
+    return {
+        **guide,
+        "steps": [
+            "1. Assemble the model as {sheet: rows}: 'snapshots' [{snapshot}], component sheets ('buses', 'generators', 'loads', ...) one row per component with PyPSA attribute names and units, series '<component>-<attr>' one row per snapshot {snapshot, <component name>: value}.",
+            "2. Optional: module sheets (RAGNAROK_FuelPrices, RAGNAROK_CarrierOutputCap, ...) and settings as app_state {key: value} (copy the keys from get_app_state of a project set up in the GUI).",
+            "3. build_project_file(model, dest, app_state) writes the .db with Ragnarok's own writer (schema stamped, catalog and sections filled).",
+            "4. import_project(dest) opens it as the working project; export_project_file saves the working project back to a .db.",
+        ],
+        "tools": ["build_project_file", "import_project", "export_project_file", "get_app_state", "set_app_state"],
+    }
+
+
+@mcp.tool(
+    annotations=_EXPORT_ANN,
+    description="Write a Ragnarok project file (.db) from a model WITHOUT touching the working project — how another tool or MCP server (VOID, a pipeline) authors a project for Ragnarok. model = {sheet: rows} in PyPSA names and units (describe_project_file has the format); app_state = settings {key: value} to carry; example = {label, description, order} to list it as a bundled example. 'dest' is the output path (default ragnarok_project.db). Returns the path, byte size and the sheets with their sections.",
+)
+async def build_project_file(
+    model: dict[str, list[dict[str, Any]]],
+    dest: str | None = None,
+    app_state: dict[str, str] | None = None,
+    filename: str = "",
+    scenario_name: str = "",
+    example: dict[str, Any] | None = None,
+) -> Any:
+    body = {"model": model, "appState": app_state, "filename": filename, "scenarioName": scenario_name, "example": example}
+    data, suggested = await get_client().build_project_file(body)
+    out = _resolve_out(dest, suggested or "ragnarok_project.db")
+    out.write_bytes(data)
+    return {"status": "built", "path": str(out), "bytes": len(data), "sheets": sorted(model)}
+
+
+@mcp.tool(
+    annotations=_EXPORT_ANN,
+    description="Save the CURRENT working project as one project file (.db): the model plus every app setting (enabled modules, each module's options, run controls, plugin settings), the file the GUI saves and opens. 'dest' overrides the path. Does not change the project.",
+)
+async def export_project_file(dest: str | None = None) -> Any:
+    data, suggested = await get_client().export_project_file()
+    out = _resolve_out(dest, suggested or "ragnarok_project.db")
+    out.write_bytes(data)
+    return {"status": "exported", "path": str(out), "bytes": len(data)}
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Read every app setting the working project holds (its app state): {key: value} with values as the browser stores them (JSON strings). Keys include 'ragnarok:settings' (Settings, incl. enabledModules), 'ragnarok:session:controls' (run controls: window, carbon price, constraints, the live scenario), 'ragnarok:fe-plugins:configs' and 'ui:be-plugin-cfg:<plugin>' (plugin settings) and each module's own keys. null when no project is loaded.",
+)
+async def get_app_state() -> Any:
+    return await get_client().get_app_state()
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Change the working project's app settings (see get_app_state for the keys). state = {key: value-string}; replace=false (default) merges these keys in and a null value removes a key; replace=true stores exactly this set. Open GUIs re-apply the settings at once. Values are the browser's strings: JSON-encode objects. Re-call with confirm=true to apply.",
+)
+async def set_app_state(state: dict[str, str | None], replace: bool = False, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"{'Replace' if replace else 'Update'} {len(state)} app setting(s) of the working project.",
+            {"keys": sorted(state), "replace": replace},
+        )
+    return await get_client().set_app_state(state, replace=replace)
 
 
 @mcp.tool(
@@ -2522,6 +2600,11 @@ declare_areas({
     "export_model": "files",
     "import_network": "files",
     "import_project": "files",
+    "describe_project_file": "files",
+    "build_project_file": "files",
+    "export_project_file": "files",
+    "get_app_state": "session",
+    "set_app_state": "session",
     "export_workbook": "files",
     "import_result": "files",
     "get_server_info": "session",

@@ -52,6 +52,8 @@ import {
 } from 'lib/types';
 import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
 import { useSessionSync } from 'shared/hooks/useSessionSync';
+import { adoptProjectAppState, disarmAppStateCapture, withoutAppStateSheet } from 'lib/appState/appState';
+import { subscribeAppStateChanges } from 'lib/sessionEvents';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, needsCostBasisMigration, normalizeInputDatesToIso, parseWorkbook, SCHEMA_SHEET } from 'lib/workbook/workbook';
 import { formatCostBasisMigration } from 'lib/settings/costBasisMigration';
@@ -1010,6 +1012,8 @@ function AppInner() {
     // A load replaces the working model: nothing before it may be undone.
     clearHistory();
     userLoadedRef.current = true;
+    // The browser's settings are about to become this project's (lib/appState): stop writing them until adopted.
+    disarmAppStateCapture();
     // The backend session is the source of truth for the working model. Every
     // load path funnels through here, so mirror the model into the session once
     // per load (not per edit — that per-keystroke full-model serialisation is
@@ -1051,8 +1055,15 @@ function AppInner() {
         discountRate: settings.discountRate,
       }).then((meta) => {
         void presentCostBasisMigration(meta.costBasisMigration, { refresh: true });
+        // The model is in the session with its own settings (or the current ones): adopt them.
+        void adoptProjectAppState();
         return meta;
+      }).catch((error: unknown) => {
+        void adoptProjectAppState(); // re-arm on the session's current project
+        throw error;
       }));
+    } else {
+      void adoptProjectAppState();
     }
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
@@ -1074,7 +1085,7 @@ function AppInner() {
       }
     }
     setSessionSeriesCounts(incomingSeriesCounts);
-    setModel(stripSeriesSheets(nextModel));
+    setModel(stripSeriesSheets(withoutAppStateSheet(nextModel)));
     setResults(null);
     setResultsModel(null);
     setHydratedRunSeries(null);
@@ -1370,6 +1381,12 @@ function AppInner() {
   // now nothing refreshed it, so the agent's five buses sat in the session while
   // the Bus grid read 0 rows. Temporal sheets hid the problem by being fetched
   // live, which made it look like a partial write rather than a stale mirror.
+  // An agent (MCP set_app_state) changed the project's settings: apply them.
+  useEffect(() => subscribeAppStateChanges(() => {
+    showToast('Settings changed by an agent — applying them…', 'info');
+    void adoptProjectAppState();
+  }), [showToast]);
+
   useSessionSync((event) => {
     void (async () => {
       await refreshStaticFromSession();
@@ -1702,7 +1719,10 @@ function AppInner() {
           // Already in the session — don't push it straight back, and drop the resyncs the
           // default empty model asked for before this point (they would wipe it).
           adoptedAtTickRef.current = staticResyncTickRef.current;
-          resetForNewModel(savedModel, controls?.filename, { pushToSession: false });
+          // The name the project itself was saved under (run controls carried over from another project
+          // must not rename it), else the run controls'.
+          const bootName = (await getSessionMeta().catch(() => null))?.filename || controls?.filename || undefined;
+          resetForNewModel(savedModel, bootName, { pushToSession: false });
           // Static rehydrate drops series; learn them from the session meta so
           // the Model tree lists the temporal sheets (paged into the grid on
           // demand) instead of hiding them.
@@ -1942,6 +1962,29 @@ function AppInner() {
     // a bottom-right toast, since parsing a full-year project takes a moment.
     setStatus(`Importing ${file.name}…`);
     showToast(`Importing ${file.name} — this can take a moment for a full run.`, 'info');
+    if (/\.(db|sqlite3?)$/i.test(file.name)) {
+      // A project file: the server makes it the session's project (model + every setting); the editor
+      // rehydrates from the session like an example, and adopting its settings reloads the page once.
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const resp = await fetch(`${API_BASE}/api/project-file?session_id=${encodeURIComponent(DEFAULT_SESSION_ID)}`, { method: 'POST', body: form });
+        if (!resp.ok) throw new Error((await resp.text()) || `Open failed (HTTP ${resp.status})`);
+        const savedModel = await getSessionFullModel({ staticOnly: true });
+        if (!savedModel) throw new Error('The project could not be read back from the session.');
+        resetForNewModel(savedModel, file.name.replace(/\.(db|sqlite3?)$/i, '.xlsx'), { pushToSession: false });
+        await refreshSeriesCounts();
+        setStatus(`Opened project file ${file.name}.`);
+        showToast(`Project opened (${file.name})`, 'success');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to open the project file.';
+        setStatus(message);
+        showToast(message, 'error');
+      } finally {
+        event.target.value = '';
+      }
+      return;
+    }
     try {
       // Importing a project is OPENING A FILE — load its model + solved results
       // into the editor (like File→Open). It does NOT create a History entry:
@@ -2068,6 +2111,28 @@ function AppInner() {
           ? `Imported result: ${files[0].name} — stored in History.`
           : `Imported ${ok} of ${files.length} results — stored in History.`,
       );
+    }
+  };
+
+  // Save Project File: the session's project.db — model plus every app setting — as one file.
+  const handleExportProjectFile = async () => {
+    try {
+      // The editor's unsynced static edits go in first, so the file is what the screen shows.
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/project-file?session_id=${encodeURIComponent(DEFAULT_SESSION_ID)}`);
+      if (!resp.ok) throw new Error((await resp.text()) || `Save failed (HTTP ${resp.status})`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${projectBaseName(filename)}.db`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('Project file saved (.db: model + settings)', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to save the project file.', 'error');
     }
   };
 
@@ -3878,7 +3943,7 @@ function AppInner() {
   return (
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImport} />
-      <input ref={projectImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
+      <input ref={projectImportInputRef} type="file" accept=".db,.sqlite,.sqlite3,.zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
       <input ref={resultImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden multiple onChange={handleImportResultXlsx} />
       <input ref={csvFolderImportInputRef} type="file" accept=".zip,application/zip" hidden onChange={handleImportCsvFolder} />
       <input ref={netcdfImportInputRef} type="file" accept=".nc" hidden onChange={handleImportNetcdf} />
@@ -4299,6 +4364,7 @@ function AppInner() {
               onSaveAs={saveAsWorkbook}
               onImportProject={() => projectImportInputRef.current?.click()}
               onExportProject={handleExportProject}
+              onExportProjectFile={() => { void handleExportProjectFile(); }}
               onOpenMasterModel={() => setMasterDialogOpen(true)}
               onImportCsvFolder={() => csvFolderImportInputRef.current?.click()}
               onExportCsvFolder={handleExportCsvFolder}

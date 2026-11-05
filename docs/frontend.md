@@ -1164,7 +1164,9 @@ model update:
 #### `useSettings() -> [AppSettings, (patch: Partial<AppSettings>) => void]`
 
 Loads `AppSettings` from `localStorage` on mount and provides a stable
-`updateSettings` callback. Settings are persisted on every update.
+`updateSettings` callback. Settings are persisted on every update, and travel
+with the project like every project setting (`lib/appState`,
+[project-file.md](./project-file.md) §4).
 
 **`AppSettings` fields:**
 
@@ -1458,7 +1460,7 @@ sheet `RAGNAROK_CustomDSL` holding the raw multiline text.
 #### `usePersistedState<T>(key, initial) -> [T, (v: T) => void]`
 
 `useState` backed by `localStorage`. Survives view remounts and full page
-reloads. Uses `initial` on the first run and whenever stored JSON fails to
+reloads, and is saved with the project (`lib/appState`). Uses `initial` on the first run and whenever stored JSON fails to
 parse. Silently ignores quota errors.
 
 Used by `App.tsx` for `tab` (key `'ui:workspace-tab'`) and by `SettingsView`
