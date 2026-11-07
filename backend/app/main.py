@@ -1044,6 +1044,8 @@ from .routers import fuel_costs as _fuel_costs_router  # noqa: E402
 app.include_router(_fuel_costs_router.router)
 from .routers import operations_modules as _operations_modules_router  # noqa: E402
 app.include_router(_operations_modules_router.router)
+from .routers import control_panel as _control_panel_router  # noqa: E402
+app.include_router(_control_panel_router.router)
 app.include_router(_plants_router.router)
 from .routers import screening as _screening_router  # noqa: E402  (statistical site pre-screen)
 app.include_router(_screening_router.router)

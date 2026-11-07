@@ -2720,6 +2720,7 @@ from . import tools_plants  # noqa: E402,F401
 # Carbon-pricing and annual-budgets module tools.
 from . import tools_policy_modules  # noqa: E402,F401
 from . import tools_operations_modules  # noqa: E402,F401
+from . import tools_control_panel  # noqa: E402,F401
 
 # Study index and reader (which reliability / market / company studies a solve carries; one study's result).
 from . import tools_studies  # noqa: E402,F401

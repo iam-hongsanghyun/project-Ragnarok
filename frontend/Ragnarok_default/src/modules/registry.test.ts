@@ -17,7 +17,7 @@ import {
   serializeEnabledModules,
 } from './registry';
 
-const MODULE_TABS: WorkspaceTab[] = ['Data', 'Forge', 'PhysicalRisk', 'Siting', 'Screening', 'Composites', 'PostAnalysis', 'Reporting', 'Training'];
+const MODULE_TABS: WorkspaceTab[] = ['Data', 'Forge', 'PhysicalRisk', 'Siting', 'Screening', 'Composites', 'ControlPanel', 'PostAnalysis', 'Reporting', 'Training'];
 const CORE_TABS: WorkspaceTab[] = ['Welcome', 'Build', 'Model', 'Market', 'Settings', 'Analytics', 'History', 'Plugins'];
 
 describe('the core/module split', () => {

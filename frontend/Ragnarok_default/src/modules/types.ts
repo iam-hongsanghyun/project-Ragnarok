@@ -23,6 +23,7 @@ export type TabModuleId =
   | 'Siting'
   | 'Screening'
   | 'Composites'
+  | 'ControlPanel'
   | 'PostAnalysis'
   | 'Reporting'
   | 'Training';

@@ -19,6 +19,7 @@ import { physicalRiskModule } from './physical-risk/manifest';
 import { screeningModule } from './screening/manifest';
 import { sitingModule } from './siting/manifest';
 import { compositesModule } from './composites/manifest';
+import { controlPanelModule } from './control-panel/manifest';
 import { postAnalysisModule } from './post-analysis/manifest';
 import { reportingModule } from './reporting/manifest';
 import { trainingModule } from './training/manifest';
@@ -31,6 +32,7 @@ export const TAB_MODULES: readonly TabModuleDefinition[] = [
   sitingModule,
   screeningModule,
   compositesModule,
+  controlPanelModule,
   postAnalysisModule,
   reportingModule,
   trainingModule,

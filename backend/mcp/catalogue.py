@@ -313,11 +313,16 @@ AREAS: dict[str, Area] = {
             "weightings; maintenance.",
             ("get_time_units", "set_time_units", "retarget_snapshots"),
             "ramp ramping unit commitment min up down time hours minutes snapshot step resolution weightings "
-            "maintenance outage rolling horizon 램프 기동 정지 시간 스냅샷 정비",
+            "maintenance outage rolling horizon control panel switch toggle on off disable constraint filter carrier "
+            "램프 기동 정지 시간 스냅샷 정비 스위치 제약 끄기 켜기",
             (
                 (
                     "state a ramp limit in per-minute or hours",
                     ("get_time_units", "set_time_units", "preview_time_units"),
+                ),
+                (
+                    "switch ramp limits off for coal and gas without deleting the values",
+                    ("get_control_switches", "get_column_values", "set_control_switches", "submit_solve(confirm=true)"),
                 ),
                 (
                     "change the time step to 3 hours",

@@ -57,6 +57,7 @@ const TAB_LABEL: Partial<Record<WorkspaceTab, string>> = {
   PhysicalRisk: 'Physical Risk',
   Siting: 'Siting',
   Composites: 'Composites',
+  ControlPanel: 'Control Panel',
   PostAnalysis: 'Post-analysis',
   History: 'History',
   Plugins: 'Plugins',

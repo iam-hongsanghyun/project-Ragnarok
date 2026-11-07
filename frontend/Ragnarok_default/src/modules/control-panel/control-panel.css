@@ -1,0 +1,36 @@
+/* Control Panel tab: switch rules for stated-value constraints. Tokens only (see styles/_tokens.css). */
+.control-panel-view { display: flex; flex-direction: column; min-height: 0; }
+.cp-header { display: flex; align-items: baseline; gap: 12px; padding: 6px 4px; font-size: var(--fs-sm); color: var(--text); }
+.cp-header__sum { color: var(--muted); }
+.cp-scroll { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px 40px; display: flex; flex-direction: column; gap: 12px; max-width: 1200px; }
+.cp-note { margin: 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; }
+.cp-error { margin: 0; font-size: var(--fs-sm); background: var(--danger-soft); color: var(--danger-strong); border-radius: var(--radius-sm); padding: 6px 9px; }
+.cp-muted { color: var(--muted); }
+.cp-toolbar, .cp-actions, .cp-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cp-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); background: var(--surface); }
+.cp-table th { text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-strong); padding: 4px 8px; }
+.cp-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.cp-row--off td { background: var(--warn-soft); }
+.cp-row--edit td { background: var(--panel-strong); }
+.cp-row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.cp-switch { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: var(--fs-xs); color: var(--muted); }
+.cp-switch__knob { position: relative; width: 30px; height: 16px; border-radius: 8px; background: var(--border-strong); transition: background 0.15s; }
+.cp-switch__knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); transition: left 0.15s; }
+.cp-switch--on .cp-switch__knob { background: var(--brand); }
+.cp-switch--on .cp-switch__knob::after { left: 16px; }
+.cp-switch--on .cp-switch__text { color: var(--brand); font-weight: 600; }
+.cp-switch:not(.cp-switch--on) .cp-switch__text { color: var(--warn-text); font-weight: 600; }
+.cp-editor { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.cp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 14px; }
+.cp-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); }
+.cp-field > span { color: var(--muted); }
+.cp-fieldset { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px 10px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.cp-fieldset legend { font-size: var(--fs-sm); color: var(--text-secondary); padding: 0 4px; }
+.cp-checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.cp-values { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px 14px; max-height: 200px; overflow: auto; }
+.cp-check { display: flex; gap: 6px; align-items: center; font-size: var(--fs-sm); }
+.cp-check--na { color: var(--muted); }
+.cp-count { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.cp-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; }
+.cp-section h4 { margin: 0 0 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary); }
+.cp-notes { margin: 0; padding-left: 18px; font-size: var(--fs-sm); display: flex; flex-direction: column; gap: 2px; }

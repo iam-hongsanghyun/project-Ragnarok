@@ -53,7 +53,8 @@ RESERVED_IDS: frozenset[str] = frozenset({
     # core tabs
     "Welcome", "Build", "Model", "Market", "Settings", "Analytics", "History", "Plugins",
     # built-in modules
-    "Data", "Forge", "PhysicalRisk", "Siting", "PostAnalysis", "Reporting", "Training", "P2X",
+    "Data", "Forge", "PhysicalRisk", "Siting", "Screening", "Composites", "ControlPanel", "PostAnalysis", "Reporting",
+    "Training", "P2X",
 })
 
 _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")

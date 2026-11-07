@@ -120,6 +120,7 @@ import { SitingView } from './views/SitingView';
 import { ScreeningView } from './views/ScreeningView';
 import type { SitingHandoff } from 'lib/screening/screening';
 import { CompositesView } from './modules/composites/CompositesView';
+import { ControlPanelView } from './modules/control-panel/ControlPanelView';
 import { CompositeEditModal } from './modules/composites/CompositeEditModal';
 import { ReportingView } from './views/ReportingView';
 import { TrainingView } from './views/TrainingView';
@@ -4549,6 +4550,8 @@ function AppInner() {
               onFocusHandled={() => setCompositeFocus(null)}
             />
           )}
+
+          {tab === 'ControlPanel' && enabledModules.has('ControlPanel') && <ControlPanelView />}
 
           {tab === 'History' && (
             <div className="analytics-view">

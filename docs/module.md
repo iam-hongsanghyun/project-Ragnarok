@@ -58,6 +58,7 @@ loop still works end to end.
 | Siting | `Siting` | location optimisation: candidate scan + capacity-expansion solve |
 | Screening | `Screening` | statistical pre-screen of solar / wind sites and of regions on uploaded historical series: correlation, clustering, within- vs between-region structure, complementarity, portfolios, add selected sites to the model |
 | P2X | `P2X` | power-to-X use cases (H2, ammonia, methanol, e-fuels): chain builder, RFNBO matching, LCOH / LCOA / LCOM results |
+| Control Panel | `ControlPanel` | switches for constraints PyPSA applies when a value is stated (ramp limits, start-up / shut-down ramps, min up / down times, `committable`, `p_min_pu`): a rule selects rows of a component by any column (carrier by default) and its values; switched off, the run solves its own copy with PyPSA's default for those attributes and lists the rule in its notes, while the workbook keeps every value. Rules live in the project (`ragnarok:control-panel:rules`); applied by the module's `submit` hook (`backend/app/control_panel/`); MCP `get_control_switches` / `set_control_switches` |
 | Post-analysis | `PostAnalysis` | tools that read a finished run without re-solving |
 | Training | `Training` | the guided course / interactive walkthroughs |
 

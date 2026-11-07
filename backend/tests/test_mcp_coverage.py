@@ -71,6 +71,7 @@ MODULES: dict[str, dict[str, tuple[str, ...]]] = {
     "annual_budgets": {"inputs": ("set_annual_budget", "apply_annual_budgets"), "reads": ("get_annual_budgets",)},
     "carbon_pricing": {"inputs": ("set_carbon_price", "save_scenario"), "reads": ("get_carbon_price",)},
     "company": {"inputs": ("submit_solve", "edit_sheet"), "reads": ("compare_companies", "get_study_result", "get_run_analysis")},
+    "control_panel": {"inputs": ("set_control_switches", "submit_solve"), "reads": ("get_control_switches", "preview_control_switches", "get_column_values")},
     "constraints": {"inputs": ("set_custom_dsl", "save_scenario", "edit_sheet"), "reads": ("list_scenarios", "describe_scenario")},
     "demand_response": {"inputs": ("apply_demand_response",), "reads": ("get_demand_response", "get_study_result")},
     "emissions": {"inputs": ("submit_solve",), "reads": ("get_study_result", "get_kpis")},
