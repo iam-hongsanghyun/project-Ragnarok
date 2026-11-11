@@ -22,7 +22,9 @@ function TutorialCard({ tutorial, progress, onStart }: {
   onStart: () => void;
 }) {
   const percent = percentComplete(tutorial, progress);
-  const started = percent > 0;
+  // Started once the learner has been on a step, ticked or not — moving
+  // through steps without ticking them is still progress to come back to.
+  const started = percent > 0 || progress.currentStepId !== null;
   return (
     <article className="training-card">
       <header className="training-card__head">

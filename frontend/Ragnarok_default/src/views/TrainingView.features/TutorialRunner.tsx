@@ -35,7 +35,7 @@ interface Props {
   onNavigate: (tab: WorkspaceTab) => void;
   /** Start this step's spotlight walkthrough of the real UI. */
   onStartGuide: (stops: Spotlight[], stepId?: string, startIndex?: number) => void;
-  /** Return to the tutorial picker. */
+  /** Return to the module list. */
   onExit: () => void;
   onReset: () => void;
   /** What the session currently holds, for the start-state banner. */
@@ -233,7 +233,7 @@ export function TutorialRunner({
       <ViewPaneHeader>
         <div className="training-runner__head">
           <div className="training-runner__title">
-            <button type="button" className="training-back" onClick={onExit}>All tutorials</button>
+            <button type="button" className="training-back" onClick={onExit}>All modules</button>
             <h2>{tutorial.title}</h2>
             <span className={`training-level training-level--${tutorial.level.toLowerCase()}`}>{tutorial.level}</span>
           </div>

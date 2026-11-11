@@ -113,6 +113,18 @@ describe('Training: leave a step, then Back to tutorial', () => {
     expect(stepTitle(c)).toBe(target.items[2].step.title);
   });
 
+  it('the runner back button goes to the module list and the card offers Continue', async () => {
+    mounted = await mount(<Harness />);
+    const c = mounted.container;
+    expect(c.querySelector('.training-card button')?.textContent).toBe('Start');
+    await goToThirdStep(c);
+    await click(button(c, 'All modules'));
+    // Nothing ticked yet, but the learner has been on a step: that is progress.
+    expect(c.querySelector('.training-card button')?.textContent).toBe('Continue');
+    await click(c.querySelector('.training-card button'));
+    expect(stepTitle(c)).toBe(target.items[2].step.title);
+  });
+
   it('survives a full reload: the module and step come back from storage', async () => {
     mounted = await mount(<Harness />);
     await goToThirdStep(mounted.container);
