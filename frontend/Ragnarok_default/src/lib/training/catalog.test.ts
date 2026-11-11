@@ -1,7 +1,10 @@
 import { describe, test, expect } from '@jest/globals';
 import fs from 'fs';
 import path from 'path';
-import { TUTORIALS, LEVEL_ORDER, findTutorial, tutorialsByLevel } from './catalog';
+import {
+  TUTORIALS, LEVEL_ORDER, findTutorial, moduleEntryStepId, modulesWithSteps, positionInModule, resumeTarget,
+  sectionOfStep, tutorialsByLevel,
+} from './catalog';
 import { POWER_MARKET_COURSE } from './course';
 
 /**
@@ -201,5 +204,35 @@ describe('course modules', () => {
     const file = fs.readFileSync(
       path.resolve(__dirname, '../../../../../backend/tests/test_training_checkpoints.py'), 'utf8');
     for (const n of [16, 17, 18, 19]) expect(file).toMatch(new RegExp(`def test_module_${n}_`));
+  });
+});
+
+describe('module position and resume helpers', () => {
+  const course = POWER_MARKET_COURSE;
+  const mod = modulesWithSteps(course).find((m) => m.items.length >= 3)!;
+  const [first, second, third] = mod.items.map((i) => i.step);
+
+  test('positionInModule counts within the module, like the runner', () => {
+    expect(positionInModule(course, third.id)).toEqual({ index: 2, count: mod.items.length });
+    expect(positionInModule(course, 'no-such-step')).toBeNull();
+    expect(sectionOfStep(course, third.id)).toBe(mod.module.section);
+  });
+
+  test('moduleEntryStepId resumes the stored step, else the first unticked one', () => {
+    const base = { completed: [], currentStepId: null };
+    expect(moduleEntryStepId(course, { ...base, currentStepId: third.id }, mod.module.section)).toBe(third.id);
+    expect(moduleEntryStepId(course, { ...base, completed: [first.id] }, mod.module.section)).toBe(second.id);
+    expect(moduleEntryStepId(course, base, mod.module.section)).toBe(first.id);
+  });
+
+  test('resumeTarget names the module of the current step and a part-way walkthrough stop', () => {
+    const progress = { completed: [], currentStepId: third.id };
+    expect(resumeTarget(course, progress)).toMatchObject({ stepId: third.id, section: mod.module.section, guideStop: 0 });
+    const guided = course.steps.find((s) => (s.spotlights?.length ?? 0) >= 2)!;
+    expect(guided).toBeDefined();
+    expect(resumeTarget(course, { completed: [], currentStepId: guided.id, guideStop: { [guided.id]: 1 } }).guideStop).toBe(1);
+    // A finished walkthrough is not resumed.
+    const end = guided.spotlights!.length;
+    expect(resumeTarget(course, { completed: [], currentStepId: guided.id, guideStop: { [guided.id]: end } }).guideStop).toBe(0);
   });
 });

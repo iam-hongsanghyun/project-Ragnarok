@@ -129,14 +129,13 @@ import { TourHost } from './features/tour/TourHost';
 import { hasNetwork } from './features/tour/engine';
 import { TourButton } from './features/tour/TourButton';
 import type { Spotlight, TutorialProgress } from 'lib/training/types';
-import { findTutorial } from 'lib/training/catalog';
+import { findTutorial, positionInModule, resumeTarget } from 'lib/training/catalog';
 import {
   clearGuideStop,
   emptyProgress,
   guideStopFor,
   resolveCurrentStepId,
   setGuideStop,
-  stepIndex as trainingStepIndex,
 } from 'lib/training/progress';
 import { ActivityBar } from './layout/ActivityBar';
 import { isTabModule, parseEnabledModules, TAB_MODULES } from './modules/registry';
@@ -394,18 +393,22 @@ function AppInner() {
   // back the whole time. TrainingView is unmounted for most of that.
   const [trainingActiveId, setTrainingActiveId] = usePersistedState<string | null>('ragnarok:training:active', null);
   const [trainingProgress, setTrainingProgress] = usePersistedState<Record<string, TutorialProgress>>('ragnarok:training:progress', {});
+  // The module open in the Training view. Persisted for the same reason: the
+  // view unmounts while the learner does a step, and returning must reopen it.
+  const [trainingSection, setTrainingSection] = usePersistedState<string | null>('ragnarok:training:section', null);
   const activeTutorial = findTutorial(trainingActiveId);
   // A stored id the catalog no longer defines would strand the learner: no chip,
   // and the Training view falls back to the picker with no explanation. Clear it.
   useEffect(() => {
     if (trainingActiveId && !findTutorial(trainingActiveId)) setTrainingActiveId(null);
   }, [trainingActiveId, setTrainingActiveId]);
-  const activeTutorialStep = activeTutorial
-    ? trainingStepIndex(
+  // Counted within the module, like the runner's "Step 3 of 10".
+  const activeTutorialPosition = activeTutorial
+    ? positionInModule(
       activeTutorial,
       resolveCurrentStepId(activeTutorial, trainingProgress[activeTutorial.id] ?? emptyProgress()),
     )
-    : -1;
+    : null;
   // Persist the stop a tutorial walkthrough reaches, so closing it to do the
   // work does not lose the stage — "Back to tutorial" resumes right there.
   useEffect(() => {
@@ -4106,18 +4109,16 @@ function AppInner() {
               type="button"
               className="topbar-training"
               onClick={() => {
-                // "Back to tutorial" means back to WHERE THE LEARNER WAS. If a
-                // walkthrough was closed mid-way on the current step, resume it at
-                // that stage — the overlay itself navigates to the right view.
-                // Only when there is no stage to resume does the chip open the
-                // Training view.
+                // "Back to tutorial" means back to WHERE THE LEARNER WAS: the
+                // module and step they were on, not the Training front page. If a
+                // walkthrough was closed mid-way on that step, resume it at that
+                // stage — the overlay itself navigates to the right view.
+                const target = resumeTarget(activeTutorial, trainingProgress[activeTutorial.id] ?? emptyProgress());
+                setTrainingSection(target.section);
                 if (guide) { setGuide(null); setTab('Training'); return; }
-                const progress = trainingProgress[activeTutorial.id] ?? emptyProgress();
-                const stepId = resolveCurrentStepId(activeTutorial, progress);
-                const step = activeTutorial.steps.find((s) => s.id === stepId);
-                const stop = stepId ? guideStopFor(progress, stepId) : 0;
-                if (step?.spotlights && stop > 0 && stop < step.spotlights.length) {
-                  startGuide(step.spotlights, step.id, stop);
+                const step = activeTutorial.steps.find((s) => s.id === target.stepId);
+                if (step?.spotlights && target.guideStop > 0) {
+                  startGuide(step.spotlights, step.id, target.guideStop);
                 } else {
                   setTab('Training');
                 }
@@ -4125,9 +4126,9 @@ function AppInner() {
               title={`Back to "${activeTutorial.title}"`}
             >
               Back to tutorial
-              {activeTutorialStep >= 0 && (
+              {activeTutorialPosition && (
                 <span className="topbar-training__step">
-                  {activeTutorialStep + 1}/{activeTutorial.steps.length}
+                  {activeTutorialPosition.index + 1}/{activeTutorialPosition.count}
                 </span>
               )}
             </button>
@@ -4664,6 +4665,8 @@ function AppInner() {
               onActiveIdChange={setTrainingActiveId}
               progressById={trainingProgress}
               onProgressByIdChange={setTrainingProgress}
+              openSection={trainingSection}
+              onOpenSectionChange={setTrainingSection}
               modelSummary={{
                 filename,
                 buses: model.buses?.length ?? 0,

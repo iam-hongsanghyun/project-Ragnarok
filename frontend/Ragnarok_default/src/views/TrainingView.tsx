@@ -10,10 +10,12 @@
  * app itself is switch the active view so they are looking at the right place.
  * See `lib/training/catalog.ts` for the authoring rules that keep it that way.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import { WorkspaceTab } from 'lib/types';
 import { Spotlight, TutorialProgress } from 'lib/training/types';
-import { TUTORIALS, findTutorial, modulesWithSteps } from 'lib/training/catalog';
+import {
+  TUTORIALS, findTutorial, moduleEntryStepId, modulesWithSteps, sectionOfStep,
+} from 'lib/training/catalog';
 import {
   emptyProgress,
   isStepComplete,
@@ -41,6 +43,14 @@ interface Props {
   onActiveIdChange: (id: string | null) => void;
   progressById: Record<string, TutorialProgress>;
   onProgressByIdChange: (next: Record<string, TutorialProgress>) => void;
+  /**
+   * The module the learner is in, by its `section` string; null shows the
+   * module picker. Owned by App and persisted for the same reason as the
+   * progress: this view unmounts whenever the learner leaves to do a step, and
+   * "Back to tutorial" has to land on the module, not the picker.
+   */
+  openSection: string | null;
+  onOpenSectionChange: (section: string | null) => void;
   /** What the session holds, and the actions to change it — for the start-state banner. */
   modelSummary: ModelSummary;
   onClearModel: () => void | Promise<void>;
@@ -49,12 +59,10 @@ interface Props {
 
 export function TrainingView({
   onNavigate, onStartGuide, activeId, onActiveIdChange, progressById, onProgressByIdChange,
-  modelSummary, onClearModel, onLoadExample,
+  openSection, onOpenSectionChange, modelSummary, onClearModel, onLoadExample,
 }: Props) {
   const setActiveId = onActiveIdChange;
-  // The module the learner is in, by its `section` string. Null means the rail
-  // is showing the level → module picker rather than a module's steps.
-  const [openSection, setOpenSection] = useState<string | null>(null);
+  const setOpenSection = onOpenSectionChange;
   const setProgressById = onProgressByIdChange;
 
   const active = findTutorial(activeId);
@@ -80,11 +88,14 @@ export function TrainingView({
     setActiveId(id);
     const tutorial = findTutorial(id);
     const current = progressById[id] ?? emptyProgress();
-    if (tutorial && !current.currentStepId) {
-      const resolved = resolveCurrentStepId(tutorial, current);
-      if (resolved) setProgressById({ ...progressById, [id]: { ...current, currentStepId: resolved } });
+    const resolved = tutorial ? resolveCurrentStepId(tutorial, current) : null;
+    if (resolved && !current.currentStepId) {
+      setProgressById({ ...progressById, [id]: { ...current, currentStepId: resolved } });
     }
-  }, [setActiveId, progressById, setProgressById]);
+    // "Continue" opens the module that step is in. Without this the card only
+    // set the active tutorial and the picker stayed on screen.
+    if (tutorial) setOpenSection(sectionOfStep(tutorial, resolved));
+  }, [setActiveId, progressById, setProgressById, setOpenSection]);
 
   // One flat list of modules — no course to open first and no level grouping.
   // A learner picks the module they want and gets its steps.
@@ -140,7 +151,10 @@ export function TrainingView({
                   if (!course) return;
                   setActiveId(course.id);
                   setOpenSection(module.section);
-                  setProgressFor(course.id, { ...progressFor(course.id), currentStepId: items[0].step.id });
+                  // Re-entering a module resumes the step the learner was on in it.
+                  const progress = progressFor(course.id);
+                  const entry = moduleEntryStepId(course, progress, module.section) ?? items[0].step.id;
+                  setProgressFor(course.id, { ...progress, currentStepId: entry });
                 }}
               >
                 <span className="training-module-item__name">{module.title}</span>
