@@ -254,6 +254,29 @@ def test_setpoint_duals_route_reads_the_stored_sheet_per_period(client: TestClie
     assert body["sheets"] == [] and body["rows"] == [] and body["bindingHours"] == 0  # the fixture has no ramp limits
 
 
+def test_series_cards_read_their_sheets_not_the_whole_run(client: TestClient, name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The load duration curve, totals and set-point duals read their own sheets: the whole run is never loaded
+    (a 2.7 GB run loaded whole by several cards at once took the server down on an 8 GB machine)."""
+    whole = _get(client, name, "duration-curve", source="load")["values"]
+    rd_router._BUNDLE_CACHE.clear()
+
+    def no_whole_run(_name: str) -> None:
+        raise AssertionError("the whole run was loaded")
+
+    monkeypatch.setattr(run_store, "get_run", no_whole_run)
+    assert _get(client, name, "duration-curve", source="load")["values"] == whole
+    _get(client, name, "totals")
+    assert _get(client, name, "setpoint-duals")["bindingHours"] == 0
+
+
+def test_whole_run_above_the_size_limit_is_refused_not_loaded(client: TestClient, name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    rd_router._BUNDLE_CACHE.clear()
+    monkeypatch.setattr(rd_router, "_BUNDLE_MAX_BYTES", 1)
+    resp = client.get(f"/api/runs/{name}/analysis/load-analysis")
+    assert resp.status_code == 413 and "RAGNAROK_BUNDLE_MAX_BYTES" in resp.json()["detail"]
+    assert _get(client, name, "duration-curve", source="load")["total"] == 8  # sheet readers are not limited
+
+
 # ── a pathway whose periods differ: carrier performance masks inactive assets ──────────────────
 #
 # One bus. 2030: load 80 MW, wind p_max_pu 0.5 (25 MW of 50), ``gas_old`` (100 MW, 50/MWh) built 2030

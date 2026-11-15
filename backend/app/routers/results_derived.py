@@ -19,6 +19,8 @@ cards still use); these routes only load the stored run and call it.
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -31,6 +33,12 @@ router = APIRouter(tags=["results-derived"])
 
 _BUNDLE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _BUNDLE_CACHE_SIZE = 2  # whole runs held in memory; a dashboard's cards share one load
+# One whole-run load at a time: a dashboard asks several cards at once, and parallel loads of one large
+# run each held a full copy (a 2.7 GB run file took the server down on an 8 GB machine).
+_BUNDLE_LOCK = threading.Lock()
+# A run file larger than this is not loaded whole (its JSON rows take several times their size in memory):
+# the card gets a 413 instead of the server running out of memory. The granular readers still work.
+_BUNDLE_MAX_BYTES = int(os.environ.get("RAGNAROK_BUNDLE_MAX_BYTES", str(1_000_000_000)))
 _PERIOD_CACHE: dict[tuple[str, float, int, str], dict[str, Any]] = {}
 _PERIOD_CACHE_SIZE = 8  # derived period payloads (each re-extraction takes about a second)
 _STATS_CACHE: dict[tuple[str, float, int | None], dict[str, Any]] = {}
@@ -53,15 +61,26 @@ def _bundle(name: str) -> dict[str, Any]:
     hit = _BUNDLE_CACHE.get(name)
     if stamp is not None and hit is not None and hit[0] == stamp:
         return hit[1]
-    bundle = run_store.get_run(name)
-    if bundle is None:
-        raise HTTPException(status_code=404, detail="Stored run not found.")
-    if stamp is not None:
-        _BUNDLE_CACHE.pop(name, None)
-        while len(_BUNDLE_CACHE) >= _BUNDLE_CACHE_SIZE:
-            _BUNDLE_CACHE.pop(next(iter(_BUNDLE_CACHE)))
-        _BUNDLE_CACHE[name] = (stamp, bundle)
-    return bundle
+    size = path.stat().st_size if path is not None and path.exists() else 0
+    if size > _BUNDLE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(f"Run {name!r} is {size / 1e9:.1f} GB on disk, above the {_BUNDLE_MAX_BYTES / 1e9:.1f} GB this server "
+                    "loads whole (RAGNAROK_BUNDLE_MAX_BYTES); this card needs the whole run. Series and analytics still load."),
+        )
+    with _BUNDLE_LOCK:
+        hit = _BUNDLE_CACHE.get(name)  # a card that waited on the lock finds the load the first one made
+        if stamp is not None and hit is not None and hit[0] == stamp:
+            return hit[1]
+        bundle = run_store.get_run(name)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail="Stored run not found.")
+        if stamp is not None:
+            _BUNDLE_CACHE.pop(name, None)
+            while len(_BUNDLE_CACHE) >= _BUNDLE_CACHE_SIZE:
+                _BUNDLE_CACHE.pop(next(iter(_BUNDLE_CACHE)))
+            _BUNDLE_CACHE[name] = (stamp, bundle)
+        return bundle
 
 
 def _period_result(name: str, period: int, currency: str | None = None) -> dict[str, Any]:
@@ -407,8 +426,10 @@ def _series_rows(name: str, sheet: str, period: int | None) -> tuple[list[str], 
     """``(columns, rows, index_col)`` of one stored output sheet, one period when given."""
     from .. import timeseries
 
-    outputs = (_bundle(name).get("result") or {}).get("outputs") or {}
-    rows = rd.filter_series_by_period({sheet: (outputs.get("series") or {}).get(sheet) or []}, period)[sheet]
+    found = run_store.run_series_sheets(name, lambda s: s == sheet)  # that sheet alone, not the whole run
+    if found is None:
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+    rows = rd.filter_series_by_period({sheet: found.get(sheet) or []}, period)[sheet]
     columns = [str(c) for c in (rows[0].keys() if rows else [])]
     return columns, rows, timeseries.series_index_col(columns) if columns else "snapshot"
 
@@ -467,12 +488,16 @@ def get_run_analysis(
         return {"run": name, "topic": topic, "period": period, "source": source, "values": values, "total": len(values)}
     analytics = _analytics(name)
     if topic == "setpoint-duals":
-        stored = _bundle(name).get("result") or {}
-        series = rd.filter_series_by_period(
-            {k: v for k, v in ((stored.get("outputs") or {}).get("series") or {}).items() if rd._DUAL_SHEET.match(k)}, period,
-        )
-        stats = run_stats(name, period)
-        body = rd.setpoint_duals(series, (stats or {}).get("weights") or [])
+        found = run_store.run_series_sheets(name, lambda s: bool(rd._DUAL_SHEET.match(s)))  # the dual sheets alone
+        if found is None:
+            raise HTTPException(status_code=404, detail="Stored run not found.")
+        series = rd.filter_series_by_period(found, period)
+        # the whole horizon's snapshot weights are stored with the run (runMeta.snapshotWeights, n.snapshot_weightings
+        # as run_stats gives them); a pathway period's slice still needs the rebuilt network
+        weights = ((analytics.get("result") or {}).get("runMeta") or {}).get("snapshotWeights") if period is None else None
+        if weights is None:
+            weights = (run_stats(name, period) or {}).get("weights") or []
+        body = rd.setpoint_duals(series, weights)
         return {"run": name, "topic": topic, "period": period, **body}
     result = _period_result(name, period, currency) if period is not None else (analytics.get("result") or {})
     if topic == "load-analysis":

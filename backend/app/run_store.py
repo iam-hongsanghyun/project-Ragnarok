@@ -29,7 +29,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import pandas as pd
 
@@ -1068,6 +1068,23 @@ def run_series_window(
         "columns": [str(c) for c in reduced.columns],
         "rows": timeseries.df_to_records(reduced),
     }
+
+
+def run_series_sheets(name: str, wanted: Callable[[str], bool]) -> dict[str, list[dict[str, Any]]] | None:
+    """Only the output series sheets ``wanted`` accepts, read whole from the run's db.
+
+    A card that needs one or two sheets reads those tables alone instead of :func:`get_run`'s full
+    bundle (every model sheet and every output series), which for a large run does not fit in memory.
+    ``None`` if the run is missing / unsafe.
+    """
+    if not _is_safe_name(name):
+        return None
+    _ensure_run_migrated(name)
+    if not _db_path(name).exists():
+        return None
+    with _connect(name) as conn:
+        tables = _kv_get(conn, "series_tables") or {}
+        return {sheet: _read_table(conn, tbl) for sheet, tbl in tables.items() if wanted(str(sheet))}
 
 
 def run_model_sheet_page(
