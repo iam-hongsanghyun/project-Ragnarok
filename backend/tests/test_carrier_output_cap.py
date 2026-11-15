@@ -61,7 +61,7 @@ def test_analytical_cap_binds_the_fleet_sum_and_leaves_units_free() -> None:
     # Unit dispatch is free: merit order fills the cheap unit first (100 + 50 / 100 + 20), not a per-unit derate.
     np.testing.assert_allclose(coal["C1"].to_numpy(), [100.0] * HOURS, atol=1e-6)
     np.testing.assert_allclose(n.generators_t.p["G"].to_numpy(), [0.0, 30.0, 0.0, 0.0], atol=1e-6)
-    assert any("coal fleet output capped in 1 of 4" in x for x in ctx.notes)
+    assert any("'coal' (2 generators) output cap in 1 of 4" in x for x in ctx.notes)
 
 
 def test_blank_everywhere_is_unconstrained() -> None:
@@ -184,3 +184,60 @@ def test_contribute_delivers_the_sheet_as_series_and_the_run_applies_it(tmp_path
         assert any(r["name"] == "carrier_output_cap_coal" for r in res["appliedConstraints"])
     finally:
         plugins._REGISTRY = None
+
+
+# ── floors and group selectors (RAGNAROK_CarrierOutputFloor; fuel / region columns) ───────────────────────────────
+#
+# Same model: load 150 MW, C1 coal 10/MWh at b1, C2 coal 20/MWh at b2, G gas 100/MWh at b1.
+#   gas floor 40 MW at hour 0           -> G = 40, coal = 110 there (C1 100, C2 10); elsewhere G = 0
+#   fuel=coal cap 120 with C2 carrier "anthracite" (fuel coal) -> C1 + C2 = 120 at the capped hour, G = 30
+#   carrier=coal&region=north cap 50 with region on the buses (b1 north) -> C1 <= 50 there, C2 takes 100, G 0
+
+
+def test_floor_holds_the_group_up_and_leaves_units_free() -> None:
+    m = _model(None)
+    m[coc.FLOOR_SHEET] = [{"snapshot": s, "gas": f} for s, f in zip(LABELS, [40.0, None, None, None])]
+    n, ctx = _solve(m)
+    np.testing.assert_allclose(n.generators_t.p["G"].to_numpy(), [40.0, 0.0, 0.0, 0.0], atol=1e-6)
+    np.testing.assert_allclose(n.generators_t.p["C1"].to_numpy(), [100.0] * HOURS, atol=1e-6)
+    assert "carrier_output_floor_gas" in list(n.model.constraints)
+    from backend.pypsa.results.market import build_applied_constraints
+
+    row = next(r for r in build_applied_constraints(n) if r["name"] == "carrier_output_floor_gas")
+    assert row["source"] == "carrier_output_floor" and row["bindingHours"] == 1
+    # Lowering the floor by 1 MW swaps 1 MWh of gas (100) for coal (20): the dual is 80/MWh.
+    assert abs(row["shadowPrice"]) == pytest.approx(80.0, rel=1e-6)
+    assert any("output floor in 1 of 4" in x for x in ctx.notes)
+
+
+def test_fuel_column_groups_carriers() -> None:
+    m = _model(None)
+    m["carriers"].append({"name": "anthracite"})
+    for g in m["generators"]:
+        g["fuel"] = "coal" if g["name"] in ("C1", "C2") else "gas"
+    m["generators"][1]["carrier"] = "anthracite"
+    m[coc.SHEET] = [{"snapshot": s, "fuel=coal": c} for s, c in zip(LABELS, CAP)]
+    n, _ = _solve(m)
+    coal = n.generators_t.p[["C1", "C2"]].sum(axis=1).to_numpy()
+    np.testing.assert_allclose(coal, [150.0, CAP_MW, 150.0, 150.0], atol=1e-6)
+    assert coc.group_members("carrier=coal|anthracite", n.generators) == ["C1", "C2"]
+
+
+def test_region_read_from_the_bus_when_the_generator_has_none() -> None:
+    m = _model(None)
+    m["buses"] = [{"name": "b1", "region": "north"}, {"name": "b2", "region": "south"}]
+    m[coc.SHEET] = [{"snapshot": s, "carrier=coal&region=north": c} for s, c in zip(LABELS, [50.0, None, None, None])]
+    n, _ = _solve(m)
+    np.testing.assert_allclose(n.generators_t.p["C1"].to_numpy(), [50.0, 100.0, 100.0, 100.0], atol=1e-6)
+    np.testing.assert_allclose(n.generators_t.p["C2"].to_numpy(), [100.0, 50.0, 50.0, 50.0], atol=1e-6)
+    # A generator's own column wins over its bus's.
+    assert coc.group_members("carrier=coal&region=north", *coc.model_frames(m, n)) == ["C1"]
+    m["generators"][0]["region"] = "south"
+    assert coc.group_members("carrier=coal&region=north", *coc.model_frames(m, n)) == []
+
+
+def test_model_check_warns_a_selector_that_names_no_generator() -> None:
+    m = _model(None)
+    m[coc.FLOOR_SHEET] = [{"snapshot": s, "fuel=lng": 10.0} for s in LABELS]
+    codes = [f["code"] for f in check_model(m)["findings"] if "Floor" in f.get("message", "")]
+    assert "carrier_cap_no_generators" in codes

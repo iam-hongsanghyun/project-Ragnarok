@@ -239,10 +239,11 @@ def build_applied_constraints(network: pypsa.Network) -> list[dict[str, Any]]:
     for name in names:
         if name.startswith(_NATIVE_CONSTRAINT_PREFIXES):
             continue
-        if name.startswith("carrier_output_cap_"):
+        if name.startswith(("carrier_output_cap_", "carrier_output_floor_")):
             # A per-snapshot constraint (RAGNAROK_CarrierOutputCap): one dual per capped hour. shadowPrice is the
             # largest-magnitude hourly dual (currency per MW per snapshot weighting); bindingHours counts the hours with a nonzero dual.
-            out.append({"name": name, "source": "carrier_output_cap", **_linopy_vector_dual(network, name)})
+            source = "carrier_output_floor" if name.startswith("carrier_output_floor_") else "carrier_output_cap"
+            out.append({"name": name, "source": source, **_linopy_vector_dual(network, name)})
             continue
         if name.startswith("cc_"):
             source = "custom"

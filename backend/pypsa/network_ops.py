@@ -53,10 +53,11 @@ def _to_model(
     reduced = network_to_model(network)
     for sheet, rows in _preserved_config_sheets(source).items():
         reduced.setdefault(sheet, rows)
-    if time_axis != "same" and reduced.get(coc.SHEET):
-        labels = [str(r.get("snapshot", "")) for r in reduced.get("snapshots", [])]
-        if isinstance(network.snapshots, pd.DatetimeIndex):
-            reduced[coc.SHEET] = coc.realign(reduced[coc.SHEET], labels, network.snapshots, mode=time_axis)
+    for sheet in coc.SHEETS:
+        if time_axis != "same" and reduced.get(sheet):
+            labels = [str(r.get("snapshot", "")) for r in reduced.get("snapshots", [])]
+            if isinstance(network.snapshots, pd.DatetimeIndex):
+                reduced[sheet] = coc.realign(reduced[sheet], labels, network.snapshots, mode=time_axis, sheet=sheet)
     if time_axis != "same" and reduced.get(fuel_costs.SHEET_PRICES):
         labels = [str(r.get("snapshot", "")) for r in reduced.get("snapshots", [])]
         if isinstance(network.snapshots, pd.DatetimeIndex):

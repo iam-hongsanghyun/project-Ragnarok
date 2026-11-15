@@ -155,33 +155,44 @@ def _check_snapshot_alignment(model: dict[str, Any], out: list[dict[str, Any]]) 
 
 
 def _check_carrier_output_cap(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
-    """RAGNAROK_CarrierOutputCap: a carrier column with no generators, or a snapshot label off the axis, binds nothing."""
-    from backend.app.constraints.carrier_output_cap import SHEET
+    """RAGNAROK_CarrierOutputCap / RAGNAROK_CarrierOutputFloor: a column that names no generators (a carrier none carries,
+    a selector none matches), or a snapshot label off the axis, binds nothing."""
+    import pandas as pd
 
-    rows = _rows(model, SHEET)
-    if not rows:
-        return
-    carriers = {str(r.get("carrier", "")) for r in _rows(model, "generators")}
-    cols = [k for r in rows for k in r if k != "snapshot"]
-    capped = {c for c in cols if any(r.get(c) not in (None, "") for r in rows)}
-    for c in sorted(capped - carriers):
-        out.append(_finding(
-            WARN, "carrier_cap_no_generators",
-            f"{SHEET}: carrier '{c}' has caps but no generator carries it - the cap binds nothing.",
-            "Fix the column name to a generator carrier, or remove the column.",
-        ))
+    from backend.app.constraints.carrier_output_cap import SHEETS, group_members, model_frames
+
+    gens, buses_ = model_frames(model)
+    buses = buses_ if buses_ is not None else pd.DataFrame()
     axis = set(_snapshot_labels(model))
-    if axis:
-        off = {
-            _norm_snapshot(str(r.get("snapshot", ""))) for r in rows if str(r.get("snapshot", "")).strip()
-        } - axis
-        if off:
-            out.append(_finding(
-                WARN, "carrier_cap_off_axis",
-                f"{SHEET}: {len(off)} row(s) carry a snapshot that is not on the model's axis (e.g. {', '.join(sorted(off)[:3])}); "
-                "those caps never bind.",
-                "Match the labels to the snapshots sheet.",
-            ))
+    for sheet in SHEETS:
+        rows = _rows(model, sheet)
+        if not rows:
+            continue
+        cols = [k for r in rows for k in r if k != "snapshot"]
+        limited = {c for c in cols if any(r.get(c) not in (None, "") for r in rows)}
+        for c in sorted(limited):
+            try:
+                members = group_members(str(c), gens, buses if not buses.empty else None) if not gens.empty else []
+            except Exception:  # noqa: BLE001 - a malformed selector: the run refuses it with the reason
+                members = []
+            if not members:
+                out.append(_finding(
+                    WARN, "carrier_cap_no_generators",
+                    f"{sheet}: '{c}' has values but names no generator (no carrier of that name, or no generator or bus "
+                    "column matching the selector) - it binds nothing.",
+                    "Fix the column to a generator carrier or a column=value selector, or remove the column.",
+                ))
+        if axis:
+            off = {
+                _norm_snapshot(str(r.get("snapshot", ""))) for r in rows if str(r.get("snapshot", "")).strip()
+            } - axis
+            if off:
+                out.append(_finding(
+                    WARN, "carrier_cap_off_axis",
+                    f"{sheet}: {len(off)} row(s) carry a snapshot that is not on the model's axis (e.g. {', '.join(sorted(off)[:3])}); "
+                    "those limits never bind.",
+                    "Match the labels to the snapshots sheet.",
+                ))
 
 
 def _check_generators(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
