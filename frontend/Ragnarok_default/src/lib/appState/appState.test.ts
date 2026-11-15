@@ -87,4 +87,29 @@ describe('app state (every setting travels with the project)', () => {
     expect(await adoptProjectAppState()).toBe(true);
     expect(reload).toHaveBeenCalledTimes(2);
   });
+
+  test('after the reload that applied a project, the reloaded page does not reload again (no 2-3x loop)', async () => {
+    window.sessionStorage.clear();
+    const reload = jest.fn();
+    Object.defineProperty(window, 'location', { value: { ...window.location, reload }, writable: true });
+    const project = { 'ui:x': 'uploaded', 'project_ragnarok_settings': '{"currencyCode":"KRW"}' };
+    (global as any).fetch = jest.fn<Promise<Response>, []>().mockResolvedValue(jsonResponse({ state: project }));
+    window.localStorage.setItem('ui:x', 'before');
+    expect(await adoptProjectAppState()).toBe(true);
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    // The page reloads: module state is gone, and the app writes view state while it mounts before adopting.
+    jest.resetModules();
+    const fresh = await import('./appState');
+    window.localStorage.setItem('ui:panel-size', '320');
+    expect(await fresh.adoptProjectAppState()).toBe(false);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem('ui:x')).toBe('uploaded');
+    expect(window.localStorage.getItem('ui:panel-size')).toBe('320');
+
+    // A later, real change to the project's settings still reloads once.
+    (global as any).fetch = jest.fn<Promise<Response>, []>().mockResolvedValue(jsonResponse({ state: { ...project, 'ui:x': 'agent' } }));
+    expect(await fresh.adoptProjectAppState()).toBe(true);
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
 });

@@ -240,11 +240,46 @@ export async function adoptProjectAppState(sessionId: string = DEFAULT_SESSION_I
   }
   const baseline = lastPushed ?? snapshotAppState();
   if (sameAppState(state, baseline)) {
+    takeAdoptedMarker(); // a reload for these settings, if any, is done
     armAppStateCapture(baseline); // the same project as this browser's: keep syncing local changes into it
+    return false;
+  }
+  // This page was reloaded to apply exactly these settings: never reload for them again. The app writes view
+  // state while it mounts, and the module-level baseline is gone after a reload, so comparing with
+  // `localStorage` alone found a "difference" every time and reloaded two or three times in a row.
+  const fingerprint = appStateFingerprint(state);
+  if (takeAdoptedMarker() === fingerprint) {
+    applyAppState({ ...snapshotAppState(), ...state });
+    armAppStateCapture(state);
     return false;
   }
   applyAppState(state);
   lastPushed = state;
+  setAdoptedMarker(fingerprint);
   window.location.reload();
   return true;
+}
+
+/** A short stable fingerprint of a settings set (order-independent). */
+export function appStateFingerprint(state: AppState): string {
+  const text = Object.keys(state).sort().map((k) => `${k}\u0000${state[k]}`).join('\u0001');
+  let h = 5381;
+  for (let i = 0; i < text.length; i += 1) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0;
+  return `${Object.keys(state).length}:${text.length}:${h.toString(36)}`;
+}
+
+const ADOPTED_MARKER = 'ragnarok:appstate-adopted';
+
+function setAdoptedMarker(fingerprint: string): void {
+  try { window.sessionStorage.setItem(ADOPTED_MARKER, fingerprint); } catch { /* private mode: at worst one extra reload */ }
+}
+
+function takeAdoptedMarker(): string | null {
+  try {
+    const value = window.sessionStorage.getItem(ADOPTED_MARKER);
+    window.sessionStorage.removeItem(ADOPTED_MARKER);
+    return value;
+  } catch {
+    return null;
+  }
 }
