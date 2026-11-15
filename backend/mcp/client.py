@@ -19,12 +19,17 @@ Config comes from the environment:
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger("ragnarok.mcp.client")
 
 _RETRY_STATUS = {502, 503, 504}
 _MAX_RETRIES = 2
@@ -85,6 +90,7 @@ class RagnarokClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.config = config or Config.from_env()
+        self._folder_checked = False
         self._config_cache: Any = (
             None  # /api/config bundle (schema is stable per process)
         )
@@ -112,6 +118,15 @@ class RagnarokClient:
             transport=transport,
         )
 
+    def retarget(self, api_base: str, session_id: str | None = None) -> None:
+        """Talk to another backend (and session) from now on: ``open_data_folder``."""
+        from dataclasses import replace
+
+        self.config = replace(self.config, api_base=api_base.rstrip("/"),
+                              session_id=session_id or self.config.session_id)
+        self._client.base_url = self.config.api_base
+        self._config_cache = None
+
     @property
     def session_id(self) -> str:
         return self.config.session_id
@@ -120,7 +135,36 @@ class RagnarokClient:
         await self._client.aclose()
 
     # ── low-level request with light retry/backoff on transient 5xx ────────────
+    async def _apply_remembered_folder(self) -> None:
+        """Once per process: when this session has a remembered working folder (``open_data_folder``), work there.
+
+        The choice lives on this machine (``~/.ragnarok/session_folders.json``, or next to
+        ``RAGNAROK_REGISTRY_DIR``), keyed by session id, so an agent restarted under the same session goes back
+        to its folder and other sessions keep theirs.
+        """
+        if self._folder_checked:
+            return
+        self._folder_checked = True
+        registry = os.environ.get("RAGNAROK_REGISTRY_DIR", "").strip()
+        root = Path(registry).parent if registry else Path.home() / ".ragnarok"
+        try:
+            folders = json.loads((root / "session_folders.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        folder = folders.get(self.session_id) if isinstance(folders, dict) else None
+        if not folder:
+            return
+        try:
+            opened = await self._request("POST", "/api/backends/open-folder", json={"path": folder})
+        except Exception as exc:  # noqa: BLE001 - stay on the configured backend, say why in the log
+            logger.warning("Could not open the remembered working folder %s: %s", folder, exc)
+            return
+        if isinstance(opened, dict) and opened.get("apiBase"):
+            self.retarget(str(opened["apiBase"]))
+
     async def _request(self, method: str, path: str, **kw: Any) -> Any:
+        if not self._folder_checked:
+            await self._apply_remembered_folder()
         last: Exception | None = None
         for attempt in range(_MAX_RETRIES + 1):
             try:
@@ -494,6 +538,30 @@ class RagnarokClient:
         return await self._get("/api/plugins")
 
     # ── tab-modules (a whole tab; NOT a plugin — see docs/module.md) ───────────
+
+    async def open_data_folder(self, path: str) -> Any:
+        return await self._post("/api/backends/open-folder", {"path": path})
+
+    async def remember_session_folder(self, session_id: str, path: str) -> Any:
+        return await self._request("PUT", "/api/session-folders", json={"sessionId": session_id, "path": path})
+
+    async def stop_backend(self, port: int) -> Any:
+        return await self._post("/api/backends/stop", {"port": port})
+
+    async def get_data_folder(self) -> Any:
+        return await self._get("/api/data-folder")
+
+    async def get_session_folders(self) -> Any:
+        return await self._get("/api/session-folders")
+
+    async def set_default_data_folder(self, path: str) -> Any:
+        return await self._request("PUT", "/api/data-folder", json={"path": path})
+
+    async def list_backends(self) -> Any:
+        return await self._get("/api/backends")
+
+    async def list_sessions(self) -> Any:
+        return await self._get("/api/sessions")
 
     async def list_tab_modules(self) -> Any:
         return await self._get("/api/modules")

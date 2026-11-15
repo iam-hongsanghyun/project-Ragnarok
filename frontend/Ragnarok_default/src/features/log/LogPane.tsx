@@ -20,6 +20,8 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
+import { API_BASE } from 'lib/constants';
+
 interface LogEntry {
   /** ISO 8601 timestamp string. */
   ts: string;
@@ -66,7 +68,7 @@ export function LogPane() {
 
   const fetchOnce = useCallback(async () => {
     try {
-      const r = await fetch('/api/log');
+      const r = await fetch(`${API_BASE}/api/log`);
       if (!r.ok) {
         setError(`HTTP ${r.status}`);
         return;
@@ -84,7 +86,7 @@ export function LogPane() {
 
   const clearBuffer = useCallback(async () => {
     try {
-      const r = await fetch('/api/log', { method: 'DELETE' });
+      const r = await fetch(`${API_BASE}/api/log`, { method: 'DELETE' });
       if (!r.ok) {
         setError(`HTTP ${r.status}`);
         return;

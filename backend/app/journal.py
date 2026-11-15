@@ -357,6 +357,12 @@ def _record(
         "summary": summary,
         "ts": entry["ts"],
     })
+    # Every other open screen learns that this session changed, so a screen on another session can
+    # offer to switch to it (an agent works in its own session by default) and the session list re-reads.
+    events_bus.publish_all("server.changed", {
+        "area": "sessions", "sessionId": session_id, "actor": entry["actor"], "summary": summary,
+        "kind": kind,
+    })
     return entry
 
 

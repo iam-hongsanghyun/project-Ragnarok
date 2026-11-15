@@ -58,3 +58,13 @@ def _isolated_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     journal-specific tests override with their own env as needed.
     """
     monkeypatch.setenv("RAGNAROK_JOURNAL_DIR", str(tmp_path / "_journal"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_backend_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep test apps out of the machine's backend registry (``~/.ragnarok``).
+
+    A ``TestClient`` that runs the app's lifespan announces a backend; written to the real registry it would show
+    up in the browser's Settings -> Sessions as a backend that is not there.
+    """
+    monkeypatch.setenv("RAGNAROK_REGISTRY_DIR", str(tmp_path / "_registry" / "backends"))

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from '@jest/globals';
-import { API_BASE, RUN_WINDOW, applySimulationDefaults, resolveApiBase } from './config';
+import { API_BASE, RUN_WINDOW, applySimulationDefaults, apiBaseFromAddress, resolveApiBase } from './config';
 
 const shipped = { end: RUN_WINDOW.defaultSnapshotEnd, weight: RUN_WINDOW.defaultSnapshotWeight };
 afterEach(() => {
@@ -41,3 +41,19 @@ describe('API base', () => {
     expect(resolveApiBase('http://a', 'http://b')).toBe('http://a');
   });
 });
+
+describe('backend named in the address (?api=)', () => {
+  it('takes a loopback http(s) origin and drops any path', () => {
+    expect(apiBaseFromAddress('?api=http://127.0.0.1:52185')).toBe('http://127.0.0.1:52185');
+    expect(apiBaseFromAddress('?session=x&api=http%3A%2F%2Flocalhost%3A8000%2Fapi')).toBe('http://localhost:8000');
+    expect(apiBaseFromAddress('?api=http://[::1]:9000')).toBe('http://[::1]:9000');
+  });
+
+  it('ignores a missing, malformed or non-loopback base', () => {
+    expect(apiBaseFromAddress('')).toBe('');
+    expect(apiBaseFromAddress('?api=not a url')).toBe('');
+    expect(apiBaseFromAddress('?api=http://evil.example.org:8000')).toBe('');
+    expect(apiBaseFromAddress('?api=file:///etc/passwd')).toBe('');
+  });
+});
+

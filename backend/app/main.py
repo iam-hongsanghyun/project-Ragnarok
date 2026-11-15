@@ -808,6 +808,10 @@ async def _lifespan(_app: "FastAPI"):
     connection. See ``startup_status.warm``.
     """
     _load_queue_from_disk()
+    # Announce this backend so a browser on another one can find it (Settings -> Sessions).
+    from . import backends_registry as _backends_registry
+
+    _backends_registry.register_self()
     task = asyncio.ensure_future(startup_status.warm())
     pump = asyncio.ensure_future(_queue_pump())
     sweeper = asyncio.ensure_future(_export_sweeper())
@@ -819,6 +823,7 @@ async def _lifespan(_app: "FastAPI"):
     try:
         yield
     finally:
+        _backends_registry.unregister_self()
         if not task.done():
             task.cancel()
         if not pump.done():
@@ -851,7 +856,10 @@ app.add_middleware(
 # before any request can reach a mutating endpoint.
 from . import journal as _journal  # noqa: E402
 from .actor_context import ActorContextMiddleware  # noqa: E402
+from .change_events import ChangeEventsMiddleware  # noqa: E402
 
+# Inside the actor middleware (added first = inner), so it can read who made the change.
+app.add_middleware(ChangeEventsMiddleware)
 app.add_middleware(ActorContextMiddleware)
 _journal.wrap_model_store()
 
@@ -975,6 +983,7 @@ app.include_router(_results_derived_router.router)
 # the model; the frontend imports once and then fetches pages/windows on demand.
 from .routers import session as _session_router  # noqa: E402
 app.include_router(_session_router.router)
+app.include_router(_session_router.sessions_router)
 
 # Mutation journal (timeline / diffs / undo) + the live SSE event stream that
 # replaces model polling in the GUI. Both are what lets an AGENT edit the model

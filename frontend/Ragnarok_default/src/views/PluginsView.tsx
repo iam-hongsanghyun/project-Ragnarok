@@ -14,6 +14,7 @@ import { WorkbookModel } from 'lib/types';
 import { FrontendPluginHost, peekPackageKind } from '../features/plugins/frontendPlugins';
 import { PluginDetail } from '../features/plugins/PluginDetail';
 import { BackendPluginDetail } from '../features/plugins/BackendPluginDetail';
+import { useServerChange } from 'shared/hooks/useServerChange';
 import { BackendPluginManifest, installBackendPlugin, listBackendPlugins, uninstallBackendPlugin } from 'lib/api/plugins';
 import type { SessionMeta } from 'lib/api/session';
 import { useToast } from '../shared/components/Toast';
@@ -56,6 +57,8 @@ export function PluginsView(props: Props) {
       .catch(() => { /* backend down / no plugins — leave empty */ });
     return () => { cancelled = true; };
   }, []);
+  // A backend plugin installed or removed elsewhere (an agent over MCP) shows without a reload.
+  useServerChange(['plugins'], () => { void refreshBackendPlugins(); });
 
   const installed = host.installed;
   const selFe = selectedKey?.startsWith('fe:') ? installed.find((p) => `fe:${p.id}` === selectedKey) : undefined;

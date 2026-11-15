@@ -33,6 +33,107 @@ from .. import model_store
 from ..models import SessionModelPayload
 
 router = APIRouter(prefix="/api/session", tags=["session"])
+#: ``GET /api/sessions`` - the sessions on this server (the browser's session picker, MCP ``list_sessions``).
+sessions_router = APIRouter(tags=["session"])
+
+
+@sessions_router.get("/api/backends")
+def list_backends() -> dict[str, Any]:
+    """Every Ragnarok backend running on this machine with its sessions, this one first.
+
+    A host may run a second backend for an agent (another port, its own data folder); the browser lists them
+    here and connects to any with ``?api=<apiBase>&session=<id>``. See ``backend/app/backends_registry.py``.
+    """
+    from .. import backends_registry
+
+    return {"backends": backends_registry.discover()}
+
+
+class FolderBody(BaseModel):
+    path: str = ""
+
+
+class PortBody(BaseModel):
+    port: int
+
+
+def _folder_call(fn, *args):  # thin wrapper mapping FolderError to 400
+    from .. import backends_registry
+
+    try:
+        return fn(*args)
+    except backends_registry.FolderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@sessions_router.post("/api/backends/open-folder")
+def open_folder(body: FolderBody) -> dict[str, Any]:
+    """The backend working in a folder: the one already there, else a new one started on it (``apiBase``)."""
+    from .. import backends_registry
+
+    return _folder_call(backends_registry.open_folder, body.path)
+
+
+@sessions_router.post("/api/backends/stop")
+def stop_backend(body: PortBody) -> dict[str, Any]:
+    """Shut down a backend opened from Ragnarok (never this one, nor one another host started)."""
+    from .. import backends_registry
+
+    return _folder_call(backends_registry.stop_backend, body.port)
+
+
+class SessionFolderBody(BaseModel):
+    sessionId: str
+    path: str = ""
+
+
+@sessions_router.get("/api/session-folders")
+def get_session_folders() -> dict[str, Any]:
+    """The working folder remembered for each session id on this machine."""
+    from .. import backends_registry
+
+    return {"folders": backends_registry.session_folders()}
+
+
+@sessions_router.put("/api/session-folders")
+def put_session_folder(body: SessionFolderBody) -> dict[str, Any]:
+    """Remember a session's working folder (empty path forgets it); the backend for it is opened with it."""
+    from .. import backends_registry
+
+    folders = _folder_call(backends_registry.remember_session_folder, body.sessionId, body.path)
+    opened = _folder_call(backends_registry.open_folder, body.path) if body.path.strip() else None
+    return {"folders": folders, "opened": opened}
+
+
+@sessions_router.post("/api/data-folder/pick")
+def pick_data_folder(body: FolderBody) -> dict[str, Any]:
+    """Open the system folder picker on this machine; ``{"path": null}`` when cancelled."""
+    from .. import backends_registry
+
+    return {"path": _folder_call(backends_registry.pick_folder, body.path)}
+
+
+@sessions_router.get("/api/data-folder")
+def get_data_folder() -> dict[str, Any]:
+    """This backend's working folder and the one a plain start uses (``backend/.env``)."""
+    from .. import backends_registry
+
+    return backends_registry.default_folder()
+
+
+@sessions_router.put("/api/data-folder")
+def put_data_folder(body: FolderBody) -> dict[str, Any]:
+    """Make a folder the working folder of the next plain start; an empty path restores ``backend/data``."""
+    from .. import backends_registry
+
+    return _folder_call(backends_registry.set_default_folder, body.path)
+
+
+@sessions_router.get("/api/sessions")
+def list_sessions() -> dict[str, Any]:
+    """Every session on this server that holds a project, newest first (reading creates none)."""
+    return {"sessions": model_store.list_sessions()}
+
 
 
 class SheetPatch(BaseModel):

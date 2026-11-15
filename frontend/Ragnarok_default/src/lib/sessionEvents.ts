@@ -108,3 +108,46 @@ export function subscribeAppStateChanges(
     release(sessionId);
   };
 }
+
+/**
+ * Something on the server other than this session's model or settings changed: installed tab modules,
+ * plugins, runs and the queue, a module's datasets, or another session's model (`area: 'sessions'`).
+ * The backend publishes one `server.changed` after every successful write, whoever made it
+ * (`backend/app/change_events.py`), so an open screen re-reads instead of waiting for a reload.
+ */
+export interface ServerChangedEvent {
+  area: string;
+  path?: string;
+  method?: string;
+  actor?: string;
+  /** For `area: 'sessions'`: the session whose model changed. */
+  sessionId?: string;
+  summary?: string;
+  kind?: string;
+}
+
+/** The window event every view can listen to (`useServerChange`); App re-broadcasts the stream on it. */
+export const SERVER_CHANGED_EVENT = 'ragnarok:server-changed';
+
+/** Subscribe to `server.changed`. Returns an unsubscribe; a no-op when EventSource is unavailable. */
+export function subscribeServerChanges(
+  onChange: (event: ServerChangedEvent) => void,
+  sessionId: string = DEFAULT_SESSION_ID,
+): () => void {
+  const source = acquire(sessionId);
+  if (!source) return () => undefined;
+  const handler = (event: MessageEvent) => {
+    let data: ServerChangedEvent;
+    try {
+      data = JSON.parse(event.data) as ServerChangedEvent;
+    } catch {
+      return;
+    }
+    if (data && typeof data.area === 'string') onChange(data);
+  };
+  source.addEventListener('server.changed', handler as EventListener);
+  return () => {
+    source.removeEventListener('server.changed', handler as EventListener);
+    release(sessionId);
+  };
+}

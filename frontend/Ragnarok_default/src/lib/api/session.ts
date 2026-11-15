@@ -315,3 +315,140 @@ export async function clearSessionModel(sessionId = DEFAULT_SESSION_ID): Promise
   const body = await asJson<{ cleared: boolean }>(resp);
   return body.cleared;
 }
+
+/** One working-model session on the server (`GET /api/sessions`). */
+export interface ServerSession {
+  id: string;
+  filename: string;
+  scenarioName: string;
+  savedAt: string;
+  snapshotCount?: number | null;
+  componentCounts: Record<string, number>;
+}
+
+/** The sessions on this server that hold a project, newest first. */
+export async function listServerSessions(): Promise<ServerSession[]> {
+  const resp = await fetch(`${API_BASE}/api/sessions`);
+  if (!resp.ok) throw new Error(`Could not list sessions (${resp.status}).`);
+  const body = (await resp.json()) as { sessions?: ServerSession[] };
+  return Array.isArray(body.sessions) ? body.sessions : [];
+}
+
+/** One Ragnarok backend on this machine with its sessions (`GET /api/backends`). */
+export interface ServerBackend {
+  apiBase: string;
+  port: number;
+  pid?: number | null;
+  dataDir: string;
+  /** The backend this screen is talking to. */
+  self: boolean;
+  sessions: ServerSession[];
+  queue: { running: number; queued: number };
+  /** Opened from Ragnarok (a working folder): Ragnarok may shut it down. */
+  startedFromRagnarok?: boolean;
+}
+
+/** Every backend running on this machine, the one this screen talks to first. */
+export async function listServerBackends(): Promise<ServerBackend[]> {
+  const resp = await fetch(`${API_BASE}/api/backends`);
+  if (!resp.ok) throw new Error(`Could not list backends (${resp.status}).`);
+  const body = (await resp.json()) as { backends?: ServerBackend[] };
+  return Array.isArray(body.backends) ? body.backends : [];
+}
+
+/**
+ * The address of this screen opened on another session, optionally of another backend.
+ * `apiBase` empty = the app's own backend (the `api` parameter is dropped); `default` drops `session`.
+ */
+export function sessionUrl(sessionId: string, apiBase = '', href: string = window.location.href): string {
+  const url = new URL(href);
+  if (sessionId === 'default') url.searchParams.delete('session');
+  else url.searchParams.set('session', sessionId);
+  if (apiBase) url.searchParams.set('api', apiBase);
+  else url.searchParams.delete('api');
+  return url.toString();
+}
+
+/**
+ * Stop the solves of a backend: cancel every running and queued job in its queue (they can be re-run from
+ * the queue). The backend itself keeps running - an agent using it stays connected. Returns how many were
+ * cancelled.
+ */
+export async function stopBackendSolves(apiBase: string): Promise<number> {
+  const base = apiBase || API_BASE;
+  const resp = await fetch(`${base}/api/queue`);
+  if (!resp.ok) throw new Error(`Could not read the queue (${resp.status}).`);
+  const body = (await resp.json()) as { jobs?: Array<{ id: string; status: string }> };
+  const active = (body.jobs ?? []).filter((j) => j.status === 'running' || j.status === 'queued');
+  let stopped = 0;
+  for (const job of active) {
+    const cancel = await fetch(`${base}/api/queue/${encodeURIComponent(job.id)}/cancel`, { method: 'POST' });
+    if (cancel.ok) stopped += 1;
+  }
+  return stopped;
+}
+
+/** This backend's working folder and the one a plain start uses (`GET /api/data-folder`). */
+export interface DataFolderInfo {
+  current: string;
+  default: string;
+  savedInEnvFile: boolean;
+  envFile: string;
+}
+
+async function jsonOrThrow<T>(resp: Response, what: string): Promise<T> {
+  if (!resp.ok) {
+    let detail = `${what} (${resp.status})`;
+    try {
+      const body = (await resp.json()) as { detail?: unknown };
+      if (typeof body.detail === 'string') detail = body.detail;
+    } catch { /* keep the status text */ }
+    throw new Error(detail);
+  }
+  return (await resp.json()) as T;
+}
+
+export async function getDataFolder(): Promise<DataFolderInfo> {
+  return jsonOrThrow<DataFolderInfo>(await fetch(`${API_BASE}/api/data-folder`), 'Could not read the working folder');
+}
+
+/** Make `path` the working folder of the next plain start (`backend/.env`); empty restores `backend/data`. */
+export async function setDefaultDataFolder(path: string): Promise<DataFolderInfo> {
+  return jsonOrThrow<DataFolderInfo>(await fetch(`${API_BASE}/api/data-folder`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+  }), 'Could not save the default folder');
+}
+
+/** The backend working in `path`: the one already there, or one started on it. */
+export async function openDataFolder(path: string): Promise<{ apiBase: string; port: number; dataDir: string; started: boolean }> {
+  return jsonOrThrow(await fetch(`${API_BASE}/api/backends/open-folder`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+  }), 'Could not open the folder');
+}
+
+/** Shut down a backend opened from Ragnarok (by port). */
+export async function stopServerBackend(port: number): Promise<void> {
+  await jsonOrThrow(await fetch(`${API_BASE}/api/backends/stop`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port }),
+  }), 'Could not stop the backend');
+}
+
+/** The newest session of a backend that holds a project, else `default`. */
+export async function newestSessionOf(apiBase: string): Promise<string> {
+  try {
+    const resp = await fetch(`${apiBase}/api/sessions`);
+    if (!resp.ok) return 'default';
+    const body = (await resp.json()) as { sessions?: ServerSession[] };
+    return body.sessions?.[0]?.id ?? 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+/** Open the system folder picker on this machine (the backend runs here); `null` when cancelled. */
+export async function pickDataFolder(start = ''): Promise<string | null> {
+  const body = await jsonOrThrow<{ path: string | null }>(await fetch(`${API_BASE}/api/data-folder/pick`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: start }),
+  }), 'Could not open the folder picker');
+  return body.path;
+}

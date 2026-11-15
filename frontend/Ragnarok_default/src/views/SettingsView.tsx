@@ -82,6 +82,7 @@ import { SolverSection } from './SettingsView.sections/Solver';
 import type { AdvancedSolveOptions } from 'lib/settings/advancedSolve';
 import { ApiKeysSection } from './SettingsView.sections/ApiKeys';
 import { ModulesSection } from './SettingsView.sections/Modules';
+import { SessionsSection } from './SettingsView.sections/Sessions';
 import { RiskTwoStageSection } from './SettingsView.sections/RiskTwoStage';
 import { IterativeExpansionSection } from './SettingsView.sections/IterativeExpansion';
 import { CofiringSection } from './SettingsView.sections/Cofiring';
@@ -124,6 +125,7 @@ type SectionId =
   | 'projectDefaults'
   | 'apiKeys'
   | 'modules'
+  | 'sessions'
   | 'solver';
 
 type SectionGroup = 'Setup' | 'Solve' | 'Data' | 'App' | 'Market' | 'Policy' | 'Analysis';
@@ -189,6 +191,7 @@ const SECTIONS: Section[] = [
   { id: 'appearance',      label: 'Appearance',       group: 'App' },
   { id: 'projectDefaults', label: 'Project defaults', group: 'App' },
   { id: 'modules',         label: 'Modules',          group: 'App' },
+  { id: 'sessions',        label: 'Sessions',         group: 'App' },
 ];
 
 export interface SettingsViewProps {
@@ -444,6 +447,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'projectDefaults' && <ProjectDefaultsSection {...props} />}
         {section === 'apiKeys'        && <ApiKeysSection />}
         {section === 'modules'        && <ModulesSection {...props} />}
+        {section === 'sessions'       && <SessionsSection />}
         {section === 'solver'         && <SolverSection {...props} />}
       </main>
     </ResizablePanels>

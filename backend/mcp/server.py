@@ -291,6 +291,88 @@ async def list_plugins() -> Any:
 # ══════════════════════════════════════════════════════════════════════════════
 @mcp.tool(
     annotations=_RO,
+    description="Working folders: the folder (RAGNAROK_DATA_DIR) of the backend this agent talks to, this agent's session and the folder remembered for it, every session's remembered folder on this machine, and the folder a plain start of Ragnarok uses (backend/.env, else backend/data). A session's project, runs, queue and journal live in its working folder; set one with open_data_folder.",
+)
+async def get_data_folder() -> Any:
+    client = get_client()
+    out = await client.get_data_folder()
+    if isinstance(out, dict):
+        out["apiBase"] = client.config.api_base
+        out["sessionId"] = client.session_id
+        folders = (await client.get_session_folders() or {}).get("folders") or {}
+        out["sessionFolders"] = folders
+        out["thisSessionFolder"] = folders.get(client.session_id)
+    return out
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    description="Set the working folder of a session (default: this agent's, RAGNAROK_SESSION_ID): find the Ragnarok backend whose working folder (RAGNAROK_DATA_DIR) is `path`, or start one on it (this checkout's code on a free port, like `RAGNAROK_DATA_DIR=<path> run.command`), remember the folder for that session on this machine, and point this agent at it - the session's project, runs, queue and journal then live in that folder, and an agent restarted under the same session goes back to it. Other sessions keep their own folders. An empty path forgets the choice and returns to the configured backend. The browser opens the same session in Settings -> Sessions. Re-call with confirm=true to apply.",
+)
+async def open_data_folder(path: str, session_id: str | None = None, confirm: bool = False) -> Any:
+    client = get_client()
+    session = session_id or client.session_id
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            f"Make {path or 'the configured backend'} the working folder of session {session!r}: start a backend on it "
+            "if none runs there, remember the choice for this session, and send every later tool to it.",
+            {"path": path, "session_id": session})
+    opened = await client.open_data_folder(path) if path.strip() else None
+    await client.remember_session_folder(session, path)
+    if not opened:
+        from .client import Config
+
+        client.retarget(Config.from_env().api_base, session)
+        return {"sessionId": session, "folder": None, "apiBase": client.config.api_base,
+                "note": "Forgot this session's working folder; back on the configured backend."}
+    client.retarget(str(opened["apiBase"]), session)
+    return {**opened, "sessionId": session, "rememberedFor": session,
+            "browser": f"Settings -> Sessions -> Connect, or open ?api={opened['apiBase']}&session={session}"}
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    description="Make `path` the working folder a plain start of Ragnarok uses from now on (writes RAGNAROK_DATA_DIR into backend/.env; an empty path restores backend/data). Takes effect at the next start; RAGNAROK_DATA_DIR given on the command line still wins. Use open_data_folder to work there now. Re-call with confirm=true to apply.",
+)
+async def set_default_data_folder(path: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Make {path or 'backend/data'} the working folder of the next Ragnarok start.", {"path": path})
+    return await get_client().set_default_data_folder(path)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False),
+    description="Shut down a backend that was opened from Ragnarok (open_data_folder or Settings -> Sessions), by port (list_backends). Refuses the backend this agent talks to and any backend another host started. Its folder's data stays. Re-call with confirm=true to apply.",
+)
+async def stop_backend(port: int, confirm: bool = False) -> Any:
+    if get_client().config.api_base.endswith(f":{port}"):
+        return {"error": "This agent talks to that backend; open another folder first (open_data_folder)."}
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Shut down the Ragnarok backend on port {port} (its data stays).", {"port": port})
+    return await get_client().stop_backend(port)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="List every Ragnarok backend running on this machine (the app's own and any a host started for an agent on another port with its own data folder) with the sessions each holds: apiBase, port, dataDir, whether it is the backend this agent talks to, running / queued solves, and per session id, file, scenario, saved time and component counts. A browser connects to one with ?api=<apiBase>&session=<id> (Settings -> Sessions).",
+)
+async def list_backends() -> Any:
+    return await get_client().list_backends()
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="List the working-model sessions on this server that hold a project, newest first: id, file name, scenario, saved time, snapshot count, component counts. This agent works in the session named by RAGNAROK_SESSION_ID (default 'bifrost'); the browser shows one session at a time and can switch in Settings -> Sessions (or open ?session=<id>).",
+)
+async def list_sessions() -> Any:
+    out = await get_client().list_sessions()
+    if isinstance(out, dict):
+        out["thisAgentSession"] = get_client().session_id
+    return out
+
+
+@mcp.tool(
+    annotations=_RO,
     description="List third-party tab-modules installed on the server: id, label, activity-bar order, whether the tab is shown, and the package's files. A tab-module is a whole tab (see install_tab_module); plugins are separate — use list_plugins.",
 )
 async def list_tab_modules() -> Any:
@@ -2599,6 +2681,12 @@ declare_areas({
     "remove_component": "build",
     "transform_series": "transforms",
     "clear_session": "session",
+    "list_sessions": "session",
+    "list_backends": "session",
+    "get_data_folder": "session",
+    "open_data_folder": "session",
+    "set_default_data_folder": "session",
+    "stop_backend": "session",
     "attach_renewable_profiles": "data",
     "attach_hydro_inflow": "data",
     "import_dataset": "data",

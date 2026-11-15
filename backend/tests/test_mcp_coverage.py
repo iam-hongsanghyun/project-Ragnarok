@@ -37,6 +37,7 @@ Op = tuple[str, str]
 #: Operations no tool wraps, each with the reason. Keep it short and honest: a reason is "the agent cannot use this", never
 #: "not done yet". docs/bifrost-agent.md names the same set (one fact, linked from there).
 EXCLUDED: dict[Op, str] = {
+    ("POST", "/api/data-folder/pick"): "opens the system folder picker on the user's screen; an agent passes the folder to open_data_folder",
     ("GET", "/api/events"): "server-sent event stream for the browser's live updates; an MCP call is request / response (poll get_queue)",
     ("GET", "/api/exports/{job_id}"): "status poll of the browser's async export job; export_run returns the same bytes synchronously",
     ("POST", "/api/exports"): "starts the browser's async export job; export_run covers xlsx and package",

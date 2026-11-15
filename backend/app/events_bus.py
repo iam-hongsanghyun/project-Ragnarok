@@ -70,6 +70,20 @@ def publish(session_id: str, event: str, data: dict[str, Any]) -> int:
     return event_id
 
 
+def publish_all(event: str, data: dict[str, Any]) -> int:
+    """Publish one event to every session channel that has been opened; returns how many got it.
+
+    For changes that belong to no one session (installed tab modules, plugins, the run list): every open
+    screen re-reads, whichever session it shows. A channel with no subscriber still records the event,
+    so a screen that reconnects replays it.
+    """
+    with _lock:
+        names = list(_channels)
+    for name in names:
+        publish(name, event, data)
+    return len(names)
+
+
 def _register(
     session_id: str, last_id: int | None
 ) -> tuple[int, asyncio.Queue, list[tuple[int, str, dict[str, Any]]]]:

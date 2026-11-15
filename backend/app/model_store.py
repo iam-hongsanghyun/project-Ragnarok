@@ -97,3 +97,49 @@ __all__ = [
     "patch_sheet", "transform_series", "clear", "has_model", "is_series_sheet",
     "distinct_values", "resave_model", "get_cost_basis_migration", "acknowledge_cost_basis_migration",
 ]
+
+
+def list_sessions() -> list[dict]:
+    """Every session on this server that holds a project, newest first.
+
+    One entry per folder under the session root with a readable project: ``id``, ``filename``,
+    ``scenarioName``, ``savedAt``, ``snapshotCount`` and ``componentCounts`` (from the project's meta).
+    Reading never creates a session.
+    """
+    root = session_store.SESSION_DIR
+    if not root.is_dir():
+        return []
+    out: list[dict] = []
+    for entry in root.iterdir():
+        if not entry.is_dir() or entry.name.startswith(".") or not session_store._is_safe_id(entry.name):
+            continue
+        meta = get_meta(entry.name)
+        if not meta:
+            continue
+        out.append({
+            "id": entry.name,
+            "filename": meta.get("filename") or "",
+            "scenarioName": meta.get("scenarioName") or "",
+            "savedAt": meta.get("savedAt") or "",
+            "snapshotCount": meta.get("snapshotCount"),
+            "componentCounts": component_counts(meta),
+        })
+    out.sort(key=lambda s: str(s["savedAt"]), reverse=True)
+    return out
+
+
+def component_counts(meta: dict) -> dict:
+    """Rows per component sheet as the project holds them now.
+
+    The sheet entries' ``rowCount`` follows every edit; the meta's ``componentCounts`` is written only when the
+    whole model is saved, so an agent's added row would not show in it.
+    """
+    counts: dict = {}
+    for entry in meta.get("sheets") or []:
+        if not isinstance(entry, dict) or entry.get("kind") != "static":
+            continue
+        name = str(entry.get("name") or "")
+        if not name or name in ("snapshots", "network") or name.startswith(("RAGNAROK_", "_")):
+            continue
+        counts[name] = int(entry.get("rowCount") or 0)
+    return counts or dict(meta.get("componentCounts") or {})

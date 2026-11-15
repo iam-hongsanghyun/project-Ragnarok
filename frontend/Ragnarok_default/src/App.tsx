@@ -53,7 +53,8 @@ import {
 import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
 import { useSessionSync } from 'shared/hooks/useSessionSync';
 import { adoptProjectAppState, disarmAppStateCapture, withoutAppStateSheet } from 'lib/appState/appState';
-import { subscribeAppStateChanges } from 'lib/sessionEvents';
+import { SERVER_CHANGED_EVENT, subscribeAppStateChanges, subscribeServerChanges } from 'lib/sessionEvents';
+import { useServerChange } from 'shared/hooks/useServerChange';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, needsCostBasisMigration, normalizeInputDatesToIso, parseWorkbook, SCHEMA_SHEET } from 'lib/workbook/workbook';
 import { formatCostBasisMigration } from 'lib/settings/costBasisMigration';
@@ -1398,6 +1399,12 @@ function AppInner() {
     showToast('Settings changed by an agent — applying them…', 'info');
     void adoptProjectAppState();
   }), [showToast]);
+  // Everything else on the server (tab modules, plugins, runs, the queue, module datasets, other
+  // sessions): re-broadcast the backend's `server.changed` stream as a window event, which each view
+  // that shows that data listens to (`useServerChange`). No reload needed for anything an agent does.
+  useEffect(() => subscribeServerChanges((event) => {
+    window.dispatchEvent(new CustomEvent(SERVER_CHANGED_EVENT, { detail: event }));
+  }), []);
 
   useSessionSync((event) => {
     void (async () => {
@@ -3062,6 +3069,20 @@ function AppInner() {
     const timer = setInterval(() => void refreshQueue(), hasActiveJobs ? activePollMs : Math.max(15000, activePollMs));
     return () => clearInterval(timer);
   }, [refreshQueue, hasActiveJobs, activePollMs]);
+  // A run or queue item added, renamed or removed elsewhere (an agent's submit_solve) shows at once.
+  useServerChange(['queue', 'runs', 'optimise', 'solve'], () => {
+    void refreshQueue();
+    void refreshBackendRuns();
+  });
+  // A tab module installed, enabled or removed over MCP appears on the activity bar without a reload.
+  useServerChange(['modules'], () => { void externalModules.refresh(); });
+  // An agent changed the model of ANOTHER session (it works in its own, `bifrost`, by default): say so,
+  // once per burst, and where to switch.
+  useServerChange(['sessions'], (event) => {
+    if (!event.sessionId || event.sessionId === DEFAULT_SESSION_ID || event.actor === 'user') return;
+    const who = event.actor === 'agent' ? 'The agent' : 'An MCP client';
+    showToast(`${who} changed session "${event.sessionId}" — open it in Settings → Sessions to watch it.`, 'info');
+  }, { debounceMs: 1500 });
 
   const handleCancelQueueItem = useCallback(async (id: string) => {
     try {

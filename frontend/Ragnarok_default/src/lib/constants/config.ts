@@ -41,7 +41,35 @@ export function resolveApiBase(...explicit: Array<string | undefined | null>): s
   return chosen.replace(/\/+$/, '');
 }
 
-export const API_BASE = resolveApiBase(process.env.REACT_APP_API_BASE, APP_CONFIG.api.baseUrl);
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
+/**
+ * The backend this screen was opened on: `?api=<base>` in its address (Settings -> Sessions writes it to connect
+ * to another backend on this machine, e.g. one a host started for an agent). Only a loopback http(s) origin
+ * is taken; anything else is ignored and the app uses its own backend.
+ */
+export function apiBaseFromAddress(search: string): string {
+  try {
+    const raw = new URLSearchParams(search).get('api');
+    if (!raw) return '';
+    const url = new URL(raw);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !LOOPBACK_HOSTS.has(url.hostname)) return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+/** True when this screen talks to a backend named in its address rather than the app's own. */
+export const API_BASE_FROM_ADDRESS: string = (() => {
+  try {
+    return apiBaseFromAddress(window.location.search);
+  } catch {
+    return '';
+  }
+})();
+
+export const API_BASE = resolveApiBase(API_BASE_FROM_ADDRESS, process.env.REACT_APP_API_BASE, APP_CONFIG.api.baseUrl);
 
 export const MAX_UNPINNED_HISTORY = APP_CONFIG.runHistory.maxUnpinnedEntries;
 export const RUN_POLLING = APP_CONFIG.runPolling;
