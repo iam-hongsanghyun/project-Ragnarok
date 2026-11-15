@@ -1412,6 +1412,12 @@ only `co2_cap` intensity rows. Test: `test_native_constraint_routing.py` (each r
 
 ### 8.6 Per-snapshot carrier output cap (`constraints/carrier_output_cap.py`)
 
+The same module reads `RAGNAROK_CarrierOutputFloor`, the same shape with a lower bound (sum >= floor, linopy name
+`carrier_output_floor_<column>`, dual source `carrier_output_floor`). In either sheet a column is a carrier name or a
+selector `column=value` joined by `&` (alternatives by `|`), e.g. `fuel=lng`, `fuel=coal&region=서울경기`; the column is read
+on the generator's own row, else on its bus (`model_frames`, `group_members`). A floor above what the group can give makes
+the LP infeasible.
+
 Sheet `RAGNAROK_CarrierOutputCap`: a wide **temporal** sheet, first column `snapshot` (the labels of the `snapshots` sheet), then one column per carrier
 name, values in **MW**; a blank cell is no cap at that hour. For every snapshot `t` and carrier `c` with a cap, the fleet's summed dispatch is bounded
 (power, not energy: no weighting):
