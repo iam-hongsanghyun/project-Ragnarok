@@ -1908,8 +1908,9 @@ export interface PluginServerConfig {
 
 export interface AppliedConstraint {
   name: string;
-  source: 'custom' | 'dsl' | 'plugin';
+  source: 'custom' | 'dsl' | 'plugin' | 'carrier_output_cap' | 'carrier_output_floor';
   shadowPrice?: number;
+  bindingHours?: number;
 }
 
 export type ConstraintTermKind = 'gen' | 'cap' | 'cf' | 'emissions' | 'load_shed' | 'const';

@@ -17,6 +17,8 @@ const SOURCE_LABEL: Record<AppliedConstraint['source'], string> = {
   custom: 'table',
   dsl: 'DSL',
   plugin: 'plugin',
+  carrier_output_cap: 'hourly cap',
+  carrier_output_floor: 'hourly floor',
 };
 
 export function CustomDslSection({ customDsl, onCustomDslChange, appliedConstraints }: CustomDslSectionProps) {
@@ -75,7 +77,7 @@ export function CustomDslSection({ customDsl, onCustomDslChange, appliedConstrai
       <div className="sg-setting-row" data-tour="applied-constraints">
         <label className="sg-setting-label">Applied constraints (last run)</label>
         {applied.length === 0 ? (
-          <div className="constraints-cell-placeholder">No custom, DSL, or plugin constraints in the last run.</div>
+          <div className="constraints-cell-placeholder">No custom, DSL, sheet or plugin constraints in the last run.</div>
         ) : (
           <ul className="constraints-applied-list">
             {applied.map((c) => (
@@ -84,6 +86,9 @@ export function CustomDslSection({ customDsl, onCustomDslChange, appliedConstrai
                 <code className="constraints-applied-name">{c.name}</code>
                 {typeof c.shadowPrice === 'number' && Math.abs(c.shadowPrice) > 1e-9 && (
                   <span className="constraints-applied-dual">λ {c.shadowPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                )}
+                {typeof c.bindingHours === 'number' && c.bindingHours > 0 && (
+                  <span className="constraints-applied-dual">binding {c.bindingHours.toLocaleString()} h</span>
                 )}
               </li>
             ))}

@@ -2,8 +2,9 @@
  * Constraints sections, split into two Settings nav entries:
  *  - Standard Constraints: the custom-solver table + native PyPSA
  *    `global_constraints` table.
- *  - Advanced Constraints: the free-text constraint code box + the read-only
- *    applied-constraints list.
+ *  - Advanced Constraints: the free-text constraint code box, the read-only
+ *    applied-constraints list, and the constraints the model carries as sheets
+ *    (hourly group floors / caps, period budgets).
  */
 import React from 'react';
 import { AppliedConstraint, CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from 'lib/types';
@@ -12,6 +13,7 @@ import { GlobalConstraintsSection as CustomConstraintsEditor } from '../../featu
 import { CarrierGrowthEditor } from './Constraints/CarrierGrowthEditor';
 import { GlobalConstraintsTableEditor } from './Constraints/GlobalConstraintsTableEditor';
 import { CustomDslSection } from '../../features/constraints/CustomDslSection';
+import { SheetConstraintsSection } from '../../features/constraints/SheetConstraintsSection';
 
 export interface ConstraintsSectionProps {
   model: WorkbookModel;
@@ -109,10 +111,14 @@ export function StandardConstraintsSection(props: ConstraintsSectionProps) {
 
 export function AdvancedConstraintsSection(props: ConstraintsSectionProps) {
   return (
-    <CustomDslSection
-      customDsl={props.customDsl}
-      onCustomDslChange={props.onCustomDslChange}
-      appliedConstraints={props.appliedConstraints}
-    />
+    <>
+      <CustomDslSection
+        customDsl={props.customDsl}
+        onCustomDslChange={props.onCustomDslChange}
+        appliedConstraints={props.appliedConstraints}
+      />
+      <div className="sg-setting-divider" style={{ margin: '24px 0' }} />
+      <SheetConstraintsSection model={props.model} />
+    </>
   );
 }
