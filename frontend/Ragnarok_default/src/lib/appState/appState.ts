@@ -23,6 +23,8 @@
 import { API_BASE } from 'lib/constants';
 import { DEFAULT_SESSION_ID } from 'lib/api/session';
 
+import { reloadPage } from './reload';
+
 export type AppState = Record<string, string>;
 
 /** Sheet name of the app state when it travels inside a model or workbook (the server takes it out). */
@@ -218,13 +220,17 @@ export async function restoreAtBoot(
 
 /**
  * After a project was loaded into the session (or an agent changed its settings): adopt them. Returns true
- * when the page is reloading to apply them (callers stop there).
+ * when they differ from the screen's: the page reloads to apply them, or with `reload: false` waits for the
+ * person to reload (the reload never asks, so nothing waits on a person unless asked to).
  *
  * The project's settings are compared with the set this browser last synced with the project, NOT with
  * `localStorage`: the app itself writes view state while it mounts, and comparing with that would reload
  * every time (a loop). Only a different project, or a change made elsewhere, reloads.
  */
-export async function adoptProjectAppState(sessionId: string = DEFAULT_SESSION_ID): Promise<boolean> {
+export async function adoptProjectAppState(
+  sessionId: string = DEFAULT_SESSION_ID,
+  opts: { reload?: boolean } = {},
+): Promise<boolean> {
   disarmAppStateCapture();
   let state: AppState | null;
   try {
@@ -256,7 +262,9 @@ export async function adoptProjectAppState(sessionId: string = DEFAULT_SESSION_I
   applyAppState(state);
   lastPushed = state;
   setAdoptedMarker(fingerprint);
-  window.location.reload();
+  // `reload: false` (an agent changed the settings): the person reloads when it suits them. Writing stays off
+  // until then, so the screen's older values are never pushed over the project's new ones.
+  if (opts.reload !== false) reloadPage();
   return true;
 }
 

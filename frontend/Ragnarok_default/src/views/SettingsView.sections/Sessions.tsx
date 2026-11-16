@@ -19,6 +19,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 
+import { goTo } from 'lib/appState/reload';
 import { API_BASE_FROM_ADDRESS } from 'lib/constants';
 import {
   DEFAULT_SESSION_ID,
@@ -88,7 +89,7 @@ export function SessionsSection(): React.ReactElement {
       if (!path) { setOpening(false); return; }
       const opened = await openDataFolder(path);
       const session = await newestSessionOf(opened.apiBase);
-      window.location.assign(sessionUrl(session, opened.apiBase));
+      goTo(sessionUrl(session, opened.apiBase));
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not open the folder.');
       setOpening(false);
@@ -160,7 +161,7 @@ export function SessionsSection(): React.ReactElement {
           {searching ? 'Finding…' : 'Find sessions'}
         </button>
         {connectedElsewhere && (
-          <button type="button" className="tb-btn tb-btn--muted" onClick={() => { window.location.assign(sessionUrl('default', '')); }}>
+          <button type="button" className="tb-btn tb-btn--muted" onClick={() => { goTo(sessionUrl('default', '')); }}>
             Disconnect
           </button>
         )}
@@ -227,11 +228,11 @@ export function SessionsSection(): React.ReactElement {
                         <td className="sessions-muted">{formatSaved(s.savedAt)}</td>
                         <td className="sessions-actions"><div className="sessions-actions__row">
                           {isCurrent ? (connectedElsewhere && (
-                            <button type="button" className="tb-btn tb-btn--muted" onClick={() => { window.location.assign(sessionUrl('default', '')); }}>
+                            <button type="button" className="tb-btn tb-btn--muted" onClick={() => { goTo(sessionUrl('default', '')); }}>
                               Disconnect
                             </button>
                           )) : (
-                            <button type="button" className="tb-btn" onClick={() => { window.location.assign(href); }}>
+                            <button type="button" className="tb-btn" onClick={() => { goTo(href); }}>
                               Connect
                             </button>
                           )}

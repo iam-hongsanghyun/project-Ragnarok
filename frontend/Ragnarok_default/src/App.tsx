@@ -53,6 +53,7 @@ import {
 import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
 import { useSessionSync } from 'shared/hooks/useSessionSync';
 import { adoptProjectAppState, disarmAppStateCapture, withoutAppStateSheet } from 'lib/appState/appState';
+import { isAppLeaving, reloadPage } from 'lib/appState/reload';
 import { SERVER_CHANGED_EVENT, subscribeAppStateChanges, subscribeServerChanges } from 'lib/sessionEvents';
 import { useServerChange } from 'shared/hooks/useServerChange';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
@@ -1395,10 +1396,14 @@ function AppInner() {
   // the Bus grid read 0 rows. Temporal sheets hid the problem by being fetched
   // live, which made it look like a partial write rather than a stale mirror.
   // An agent (MCP set_app_state) changed the project's settings: apply them.
+  // The page is not reloaded under the person's hands: the settings are taken into the browser and a Reload
+  // button applies them when it suits them. The agent's work never waits on it.
+  const [settingsPendingReload, setSettingsPendingReload] = useState(false);
   useEffect(() => subscribeAppStateChanges(() => {
-    showToast('Settings changed by an agent — applying them…', 'info');
-    void adoptProjectAppState();
-  }), [showToast]);
+    void adoptProjectAppState(undefined, { reload: false }).then((pending) => {
+      if (pending) setSettingsPendingReload(true);
+    });
+  }), []);
   // Everything else on the server (tab modules, plugins, runs, the queue, module datasets, other
   // sessions): re-broadcast the backend's `server.changed` stream as a window event, which each view
   // that shows that data listens to (`useServerChange`). No reload needed for anything an agent does.
@@ -1606,6 +1611,7 @@ function AppInner() {
       queueJobs.length > 0 || SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
     if (!hasWork) return undefined;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isAppLeaving()) return; // the app's own reload or move never waits on a person
       e.preventDefault();
       e.returnValue = ''; // Chrome/Edge require returnValue to be set to prompt.
     };
@@ -4002,6 +4008,13 @@ function AppInner() {
 
   return (
     <div className="studio-shell">
+      {settingsPendingReload && (
+        <div className="settings-reload-banner" role="status">
+          <span>An agent changed this project’s settings.</span>
+          <button type="button" className="tb-btn" onClick={reloadPage}>Reload to apply</button>
+          <button type="button" className="tb-btn tb-btn--muted" onClick={() => setSettingsPendingReload(false)}>Later</button>
+        </div>
+      )}
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImport} />
       <input ref={projectImportInputRef} type="file" accept=".db,.sqlite,.sqlite3,.zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
       <input ref={resultImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden multiple onChange={handleImportResultXlsx} />
@@ -4105,7 +4118,7 @@ function AppInner() {
               await clearSession();
               // Reload so every component re-reads its now-empty persisted
               // state and the Welcome view is restored as the landing page.
-              window.location.reload();
+              reloadPage();
             }}
             title="Remove the loaded model AND wipe every persisted UI preference"
           >

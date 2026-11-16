@@ -112,4 +112,32 @@ describe('app state (every setting travels with the project)', () => {
     expect(await fresh.adoptProjectAppState()).toBe(true);
     expect(reload).toHaveBeenCalledTimes(2);
   });
+
+  test('an agent change with reload: false takes the settings in and waits for the person; it never pushes old values', async () => {
+    window.sessionStorage.clear();
+    const reload = jest.fn();
+    Object.defineProperty(window, 'location', { value: { ...window.location, reload }, writable: true });
+    const fetchMock = jest.fn<Promise<Response>, []>().mockResolvedValue(jsonResponse({ state: { 'ui:x': 'agent' } }));
+    (global as any).fetch = fetchMock;
+    window.localStorage.setItem('ui:x', 'screen');
+    expect(await adoptProjectAppState(undefined, { reload: false })).toBe(true);
+    expect(reload).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('ui:x')).toBe('agent');
+    // The screen still writes its older value: nothing is pushed until the person reloads.
+    const calls = fetchMock.mock.calls.length;
+    window.localStorage.setItem('ui:x', 'screen');
+    await new Promise((r) => setTimeout(r, 700));
+    expect(fetchMock.mock.calls.length).toBe(calls);
+  });
+
+  test('the app\'s own reload is marked so the leave-site question lets it through', async () => {
+    jest.resetModules();
+    const reloadMod = await import('./reload');
+    const reload = jest.fn();
+    Object.defineProperty(window, 'location', { value: { ...window.location, reload }, writable: true });
+    expect(reloadMod.isAppLeaving()).toBe(false);
+    reloadMod.reloadPage();
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(reloadMod.isAppLeaving()).toBe(true);
+  });
 });

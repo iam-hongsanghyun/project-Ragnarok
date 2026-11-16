@@ -11200,3 +11200,21 @@ section.data-import-filters__group {
 .forge-pw-messages { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs, 12px); }
 .forge-pw-error { color: var(--danger, #b91c1c); }
 .forge-pw-mip { color: var(--warning, #b45309); }
+
+/* An agent changed the project's settings: the person reloads when it suits them. */
+.settings-reload-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+}
