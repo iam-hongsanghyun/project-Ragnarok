@@ -188,11 +188,24 @@ export interface SecurityConstrainedConfig {
  *  cover a contingency; surfaces a reserve price alongside the energy price. */
 export interface ReserveConfig {
   enabled: boolean;
-  requirementType: 'fraction' | 'largestUnit' | 'both';
+  /** 'both' = fraction + largest unit; 'fixed' = requirementMw alone. */
+  requirementType: 'fraction' | 'largestUnit' | 'both' | 'fixed';
   /** Share of demand held as spinning reserve (0.1 = 10%). */
   fraction: number;
+  /** MW added to the requirement at every snapshot (a grid code's reserve); the whole requirement when 'fixed'. */
+  requirementMw?: number;
   /** 'thermal' excludes variable renewables from eligible reserve providers. */
   providers: 'all' | 'thermal';
+  /** Only generators this selector names hold reserve: column=value|value&column2=value (e.g. fuel=coal|lng). */
+  providerSelector?: string;
+  /** Only a generating unit holds reserve: r <= (1 - m) / m x p (committable units: their status). */
+  spinning?: boolean;
+  /** Minimum stable load m in (0, 1) for the spinning rule; column reserve_min_load_pu overrides it per generator. */
+  minStableLoad?: number;
+  /** Fixed-size storage units hold reserve from standstill, within their headroom and stored energy. */
+  includeStorageUnits?: boolean;
+  /** Hours a storage unit must be able to sustain its reserve (default 1). */
+  reserveDurationHours?: number;
   /** Currency/MW added to the objective (usually 0). */
   reserveCost: number;
 }

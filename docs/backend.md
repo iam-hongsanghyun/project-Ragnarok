@@ -889,7 +889,7 @@ A module is also an MCP surface: `test_mcp_coverage.py` fails when a `backend/ap
 
 | Module package | Contents | Note |
 |---|---|---|
-| `reserves/` | spinning-reserve variable, headroom and requirement constraints; the `reserve` block | `options.reserveConfig` |
+| `reserves/` | spinning-reserve variable, headroom and requirement constraints (a fraction of load, the largest unit, a fixed MW); the spinning rule (`spinning`, `minStableLoad`: only a generating unit holds reserve, `r <= (1 - m) / m x p`, a committable unit on its status); a provider selector (`column=value`); per-unit columns `reserve_min_load_pu`, `reserve_max_pu`; storage units from standstill (`includeStorageUnits`); the `reserve` block | `options.reserveConfig` |
 | `constraints/` | custom constraints, the DSL, `constraintSpecs`, `constraint_checks` | kinds PyPSA's `GlobalConstraint` expresses exactly are written as native rows (`native_routing.py`, §8.5); the rest are declared linopy constraints |
 | `stochastic/` | scenario overrides, collapse to the representative scenario, duals divided by the probability, `GlobalConstraint.mu` recovery | `set_scenarios` / `set_risk_preference` stay native |
 | `demand_response/` | shiftable and price-elastic rewiring (DR bus + Link + Store), `demandResponse` / `priceElastic` blocks | a declared, reported build step; `rows.py` writes the `dr_*` components into the workbook as visible rows (`/api/demand-response/apply`) |

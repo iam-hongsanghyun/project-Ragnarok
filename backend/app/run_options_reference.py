@@ -200,9 +200,15 @@ _FIELDS: dict[str, dict[str, tuple]] = {
     "securityConstrainedConfig": {"enabled": (_B, None, "Run SCLOPF.")},
     "reserveConfig": {
         "enabled": (_B, None, "Co-optimise reserve."),
-        "requirementType": (_S, None, "fraction of demand, the largest unit, or both (max).", ["fraction", "largestUnit", "both"]),
+        "requirementType": (_S, None, "fraction of demand, the largest unit, both (their sum), or fixed (requirementMw alone).", ["fraction", "largestUnit", "both", "fixed"]),
         "fraction": (_N, "fraction of demand", "Reserve held, 0.1 = 10%."),
+        "requirementMw": (_N, "MW", "A fixed reserve added to the requirement at every snapshot (a grid code's MW); the whole requirement when requirementType is fixed."),
         "providers": (_S, None, "thermal excludes variable renewables.", ["all", "thermal"]),
+        "providerSelector": (_S, None, "Only generators this selector names hold reserve: column=value|value&column2=value on the generators sheet (else the generator's bus), e.g. fuel=coal|lng."),
+        "spinning": (_B, None, "Only a generating unit holds reserve: r <= (1 - m) / m x p for a plain generator, p + r <= available x status for a committable one. Needs minStableLoad."),
+        "minStableLoad": (_N, "fraction of available output", "Minimum stable load m in (0, 1) for the spinning rule; the generators sheet column reserve_min_load_pu overrides it per generator."),
+        "includeStorageUnits": (_B, None, "Fixed-size storage units hold reserve from standstill, within their discharge headroom and stored energy."),
+        "reserveDurationHours": (_N, "hours", "How long a storage unit must be able to sustain its reserve (default 1)."),
         "reserveCost": (_N, "currency/MW", "Cost of holding reserve added to the objective (usually 0)."),
     },
     "outageMcConfig": {

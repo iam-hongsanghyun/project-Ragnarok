@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from backend.app import module_hooks as mh
 
-from .reserves import apply_reserve_constraints, extract_reserve_results
+from .reserves import apply_reserve_constraints, extract_reserve_results, validate_reserve_config
 
 MODULE = "reserves"
 
@@ -25,8 +25,13 @@ def _prepare(ctx: mh.RunContext) -> Callable[[Any, Any], None] | None:
             detail="Operating-reserve co-optimization cannot be combined with stochastic scenarios.",
         )
 
+    try:  # a reserve rule that cannot be honoured as written stops the run (a bad plan is a 400)
+        validate_reserve_config(reserve_cfg)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
     def contribute(n: Any, snapshots: Any) -> None:
-        apply_reserve_constraints(n, reserve_cfg, snapshots, ctx.notes)
+        apply_reserve_constraints(n, reserve_cfg, snapshots, ctx.notes, model=ctx.model)
 
     return contribute
 
