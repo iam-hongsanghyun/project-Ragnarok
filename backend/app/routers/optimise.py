@@ -62,7 +62,7 @@ register_options([
     _o("options.committableBigM", "number", "Big-M for committable + extendable units.", None, unit="MW", source="ui"),
     _o("options.cycleBasisMethod", "string", "Cycle basis for Kirchhoff voltage law.", "bfs-refined", allowed=["bfs-refined", "paton"], source="ui"),
     _o("options.meshedThresholds", "number[]", "PyPSA meshed_thresholds.", None),
-    _o("options.computeInfeasibilities", "boolean", "On an infeasible solve append the solver IIS to the error (Gurobi/Xpress); other solvers fall back to Ragnarok's diagnosis.", False, source="ui"),
+    _o("options.computeInfeasibilities", "boolean", "On an infeasible solve append the solver IIS to the error (Gurobi/Xpress/HiGHS); other solvers fall back to Ragnarok's diagnosis.", False, source="ui"),
     _o("options.modelKwargs", "object", "linopy.Model kwargs (solver_dir, chunk).", {}),
     _o("options.logToConsole", "boolean", "Forward the solver log to the console.", None),
     _o("options.riskPreference", "object", "CVaR in stochastic mode: {alpha: 0<a<1, omega: 0..1} (n.set_risk_preference). 400 without stochasticConfig.", None, reader=_OO + ", " + _RES),

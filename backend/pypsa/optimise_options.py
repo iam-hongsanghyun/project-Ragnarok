@@ -45,7 +45,7 @@ from .network.piecewise import parse_piecewise_options
 # Solvers Ragnarok knows how to describe. Availability is always probed from
 # linopy, never assumed; the list only supplies labels + capability flags.
 _SOLVER_CATALOG: dict[str, dict[str, Any]] = {
-    "highs": {"label": "HiGHS", "mip": True, "iis": False, "threads_key": "threads"},
+    "highs": {"label": "HiGHS", "mip": True, "iis": True, "threads_key": "threads"},
     "gurobi": {"label": "Gurobi", "mip": True, "iis": True, "threads_key": "Threads"},
     "cplex": {"label": "CPLEX", "mip": True, "iis": False, "threads_key": "threads"},
     "xpress": {"label": "FICO Xpress", "mip": True, "iis": True, "threads_key": "THREADS"},
@@ -108,7 +108,7 @@ def optimise_option_catalogue() -> dict[str, Any]:
             "committableBigM": "float - big-M for committable+extendable units",
             "cycleBasisMethod": "bfs-refined | paton",
             "meshedThresholds": "list[int]",
-            "computeInfeasibilities": "bool - IIS on infeasible (Gurobi/Xpress)",
+            "computeInfeasibilities": "bool - IIS on infeasible (Gurobi/Xpress/HiGHS)",
             "modelKwargs": "dict - linopy.Model kwargs (solver_dir, chunk)",
             "logToConsole": "bool",
             "riskPreference": "{alpha, omega} - CVaR in stochastic mode",
@@ -388,7 +388,7 @@ def build_branch_outages(network: Any, opts: OptimiseOptions) -> Any:
 def iis_text(network: Any, opts: OptimiseOptions) -> str:
     """Solver IIS report for an infeasible solve, or ``""``.
 
-    Only solvers that support it (Gurobi, Xpress) produce one; HiGHS and others
+    Only solvers that support it (Gurobi, Xpress, HiGHS via linopy >= 0.10) produce one; others
     fall through to Ragnarok's own diagnostics (``diagnose_infeasibility``).
     """
     if not opts.compute_infeasibilities:

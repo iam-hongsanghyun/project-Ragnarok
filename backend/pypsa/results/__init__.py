@@ -683,6 +683,15 @@ def run_pypsa(
                     else f"The solver reported status='{solve_status}', "
                          f"condition='{solve_condition}'."
                 )
+                # P19: the solver's IIS belongs here too — an infeasible solve with
+                # no load shedding lands in this gate before the acceptance gate below.
+                if not claimed_success:
+                    try:
+                        _iis = iis_text(network, oo)
+                    except Exception:  # IIS is advisory
+                        _iis = ""
+                    if _iis:
+                        solver_note += f"\nSolver IIS:\n{_iis}"
                 raise HTTPException(
                     status_code=400,
                     detail=(
