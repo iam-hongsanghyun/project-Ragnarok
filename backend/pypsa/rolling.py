@@ -231,3 +231,55 @@ def make_noncyclic(model: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             new_rows.append(row)
         out[sheet] = new_rows
     return out, changed
+
+
+#: (component list name, attribute) pairs PyPSA's ``post_processing`` rewrites for the whole horizon although it
+#: only solved the window: line flows (``p0 += losses / 2`` aligns the window's losses against every snapshot and
+#: leaves NaN outside the window), and the bus injections and voltage angles it recomputes from them.
+_WINDOW_ONLY_RESULTS = (("lines", "p0"), ("lines", "p1"), ("buses", "p"), ("buses", "v_ang"))
+
+
+def keep_results_outside_window() -> None:
+    r"""Make PyPSA's ``post_processing`` change only the snapshots of the window it solved.
+
+    PyPSA (1.x) adds each window's line losses with ``n.c.lines.dynamic.p0 += losses / 2``. ``losses`` holds only
+    the window's snapshots, so pandas alignment sets every other snapshot to NaN; after a rolling-horizon run only the
+    last window keeps its line flows (and bus injections recomputed from them). A single-window solve is unaffected.
+    The wrapper saves those results before ``post_processing`` and puts back every snapshot outside the window.
+
+    Algorithm:
+        $$x_t^{\text{after}} = \begin{cases} x_t^{\text{post}} & t \in W \\ x_t^{\text{before}} & t \notin W \end{cases}$$
+        ASCII: x_after[t] = x_post[t] if t in window W else x_before[t], for x in lines p0/p1, buses p/v_ang.
+
+    Idempotent: applying it twice wraps once.
+    """
+    from pypsa.optimization.optimize import OptimizationAccessor
+
+    original = OptimizationAccessor.post_processing
+    if getattr(original, "_ragnarok_window_only", False):
+        return
+
+    def post_processing(self: Any) -> None:
+        n = self._n
+        window = self._window.network_index
+        before = {}
+        for comp, attr in _WINDOW_ONLY_RESULTS:
+            frame = getattr(n.c, comp).dynamic.get(attr)
+            if frame is not None and not frame.empty:
+                before[(comp, attr)] = frame.copy()
+        original(self)
+        for (comp, attr), saved in before.items():
+            dyn = getattr(n.c, comp).dynamic
+            after = dyn[attr]
+            outside = ~after.index.isin(window)
+            if not outside.any():
+                continue
+            cols = after.columns.intersection(saved.columns)
+            after.loc[outside, cols] = saved.reindex(index=after.index[outside], columns=cols).to_numpy()
+            dyn[attr] = after
+
+    post_processing._ragnarok_window_only = True  # type: ignore[attr-defined]
+    OptimizationAccessor.post_processing = post_processing  # type: ignore[method-assign]
+
+
+keep_results_outside_window()
